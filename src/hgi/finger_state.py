@@ -77,6 +77,34 @@ def _straightness(
     return normalized_distance(points[chain[0]], points[chain[-1]], sum(lengths))
 
 
+_LONG_FINGER_CHAINS = (
+    (
+        HandLandmark.INDEX_FINGER_MCP,
+        HandLandmark.INDEX_FINGER_PIP,
+        HandLandmark.INDEX_FINGER_DIP,
+        HandLandmark.INDEX_FINGER_TIP,
+    ),
+    (
+        HandLandmark.MIDDLE_FINGER_MCP,
+        HandLandmark.MIDDLE_FINGER_PIP,
+        HandLandmark.MIDDLE_FINGER_DIP,
+        HandLandmark.MIDDLE_FINGER_TIP,
+    ),
+    (
+        HandLandmark.RING_FINGER_MCP,
+        HandLandmark.RING_FINGER_PIP,
+        HandLandmark.RING_FINGER_DIP,
+        HandLandmark.RING_FINGER_TIP,
+    ),
+    (
+        HandLandmark.PINKY_MCP,
+        HandLandmark.PINKY_PIP,
+        HandLandmark.PINKY_DIP,
+        HandLandmark.PINKY_TIP,
+    ),
+)
+
+
 def detect_fingers(
     hand: DetectedHand, config: GestureConfig | None = None
 ) -> FingerState:
@@ -90,36 +118,10 @@ def detect_fingers(
     config = config if config is not None else GestureConfig()
     points, reference = _hand_geometry(hand, config)
     wrist = points[HandLandmark.WRIST]
-    chains = (
-        (
-            HandLandmark.INDEX_FINGER_MCP,
-            HandLandmark.INDEX_FINGER_PIP,
-            HandLandmark.INDEX_FINGER_DIP,
-            HandLandmark.INDEX_FINGER_TIP,
-        ),
-        (
-            HandLandmark.MIDDLE_FINGER_MCP,
-            HandLandmark.MIDDLE_FINGER_PIP,
-            HandLandmark.MIDDLE_FINGER_DIP,
-            HandLandmark.MIDDLE_FINGER_TIP,
-        ),
-        (
-            HandLandmark.RING_FINGER_MCP,
-            HandLandmark.RING_FINGER_PIP,
-            HandLandmark.RING_FINGER_DIP,
-            HandLandmark.RING_FINGER_TIP,
-        ),
-        (
-            HandLandmark.PINKY_MCP,
-            HandLandmark.PINKY_PIP,
-            HandLandmark.PINKY_DIP,
-            HandLandmark.PINKY_TIP,
-        ),
-    )
     index, middle, ring, pinky = (
         _straightness(points, chain, config) >= config.extension_ratio
         and distance(wrist, points[chain[-1]]) > distance(wrist, points[chain[1]])
-        for chain in chains
+        for chain in _LONG_FINGER_CHAINS
     )
     thumb_chain = (
         HandLandmark.THUMB_MCP,
