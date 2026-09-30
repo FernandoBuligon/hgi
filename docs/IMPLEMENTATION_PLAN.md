@@ -17,8 +17,9 @@ automação, gravação de frames ou publicação.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
-e encerramento limpo. Volume, mídia, calibração, FPS e persistência ficam para
-depois da validação do MVP. Não haverá treinamento, backend, banco ou API OpenAI.
+e encerramento limpo. Volume, mídia, calibração e persistência ficam para
+depois da validação do MVP. FPS observável foi autorizado na Fase 7.
+Não haverá treinamento, backend, banco ou API OpenAI.
 
 ## 2. Inspeção inicial
 
@@ -152,7 +153,7 @@ do MVP. A Fase 7 proposta não autoriza automação implicitamente.
 | 4 — dedos e gestos | `finger_state.py`, `gesture_detector.py`; somente interpretação por mão | Fixtures sintéticas: estados nomeados, Left/Right, rotações, proporção, pinça/escalas/limite inclusivo, degenerações, prioridade e ausência; sem temporalidade | Concluída no escopo atualizado pelo usuário, seção 12. Nenhum hardware; calibração e validação visual permanecem pendentes |
 | 5 — cursor virtual | `cursor.py`, `cursor_controller.py`, comandos em memória e demo sintética; sem overlay ou captura | `test_cursor.py`, `test_cursor_controller.py`: dados/sink, centro, clipping, região, espelhamento, resoluções, EMA, reset, inatividade e clique lógico por transição | Concluída no escopo atualizado pelo usuário, seção 13. Sem hardware; alvo limitado e suave, saída inspecionável; ergonomia visual pendente |
 | 6 — temporal e opt-in lógico | `temporal.py`, observações do detector e gates do CursorController; somente sink dry-run | Clock falso: confirmação, histerese, rearmamento, cooldown inclusivo/sem fila, perda curta/longa, enable/disable/reset e falhas que desabilitam | Concluída no escopo atualizado pelo usuário, seção 14. Sem hardware/automação; backend real e fail-safe ainda pendentes |
-| 7 — overlay e ergonomia | Completar `overlay.py`, informações do modo/gesto/mão | Testar dados apresentados e modo efetivo após fallback com mocks; manual para legibilidade, feedback de pinça e instruções | Webcam/GUI. Uma pessoa entende o modo e a ação; sem excesso de métricas. FPS permanece opcional posterior |
+| 7 — integração visual dry-run | `camera.py`, `webcam.py`, `overlay.py`, demo e observabilidade pública limitada | 48 testes novos sem hardware; captura/cor/RGB, seleção, overlay, temporalidade, teclas, falhas/limpeza e CLI | Implementada, com aceite manual pendente: sem /dev/video*. FPS simples autorizado. Exclusivamente DryRunCursorSink; evidências na seção 15 |
 | 8 — gate de extras | Volume/mídia e demais extras adiados | Nenhum teste ou código de extras durante o MVP; futura fase precisará de plano próprio e testes de backend degradável | Aceite do MVP é pré-requisito; indisponibilidade de mídia não poderá afetar mouse/detecção |
 | 9 — documentação | README completo, arquitetura, testes, licença, assets, plano atualizado e instruções de demo | Reproduzir instalação em ambiente isolado e comandos do README; revisar links, gestos, matemática, histerese, segurança e limites por SO | Instalação sem câmera; execução completa exige hardware. Outra pessoa consegue instalar/executar seguindo só o README |
 | 10 — QA do MVP | Correções necessárias, revisão final e evidências | Ruff, pytest, cobertura, compileall, revisão Python/segurança/diff e quality-gate estrito se disponível no harness; roteiro manual completo | MVP só pronto com verificações automatizadas e manuais aprovadas. Pendências de hardware serão registradas, nunca tratadas como PASS |
@@ -239,10 +240,9 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após a Fase 6 autorizada,
-a próxima fase proposta é **Fase 7 — integração visual/overlay em dry-run**, que aguardará
-instrução do usuário. A validação visual do tracker ainda exige câmera e escopo
-de integração de captura apropriado. O plano não libera testes reais de controle do computador
+O aceite da Fase 0 foi restrito ao documento. A **Fase 7 — integração visual em
+dry-run** foi autorizada posteriormente e está registrada na seção 15. A validação
+visual do tracker ainda exige câmera. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
 
 ## 8. Fontes consultadas e limites da pesquisa
@@ -801,7 +801,7 @@ e adicionando os gates ausentes antes de habilitar qualquer efeito real.
 
 ## 14. Evidências da Fase 6 — proteção temporal e opt-in lógico
 
-**Estado: concluída somente a fase autorizada. Fase 7 e mouse real não iniciados.**
+**Estado: concluída somente a fase autorizada. Ao seu encerramento, Fase 7 e mouse real não iniciados.**
 O pedido atual substitui o backend PyAutoGUI da proposta original por uma camada
 temporal síncrona, testável e exclusivamente dry-run. Leitura integral de
 AGENTS.md, plano, arquitetura, cursor.py, cursor_controller.py, gesture_detector.py
@@ -1007,3 +1007,186 @@ mas `import cv2; print(cv2.__version__)` falhou com AttributeError: o desinstala
 removeu arquivos compartilhados. **Reversão executada antes de prosseguir**:
 backup restaurado, cv2 5.0.0 e pip check novamente aprovados. A correção requer
 repor contrib na mesma versão sem dependências, após nova remoção de python.
+
+### OpenCV final e manutenção executada
+
+Após a reversão documentada, foi preparada a wheel exata contrib 5.0.0.93 em
+`/tmp/hgi-phase7-opencv-wheels`. Download dentro do sandbox falhou por DNS;
+a execução autorizada fora dele recuperou a wheel do cache. Não houve download
+de outra dependência. Removido somente opencv-python; reinstalada **a mesma
+versão** contrib com `--no-deps --no-index --force-reinstall` da wheel local.
+Não foi removido MediaPipe, NumPy, ferramentas de teste ou outro pacote.
+
+Resultado real: somente opencv-contrib-python 5.0.0.93; `cv2.__version__` é
+**5.0.0**, `getBuildInformation()` informa **QT5**. `pip check` passou. Inventário
+antes/depois: removido `opencv-python`, nenhum pacote adicionado e nenhuma
+versão alterada. PyAutoGUI preexistente continua instalado, mas nunca foi
+importado/usado pela aplicação. A suíte anterior passou com **306 testes**
+após a manutenção. `pyproject.toml` agora declara contrib explicitamente nos
+extras vision/dev; não foram mudados os outros requisitos.
+
+### Arquivos e arquitetura implementada
+
+Criados: `src/hgi/camera.py`, `src/hgi/overlay.py`, `src/hgi/webcam.py`,
+`scripts/demo_webcam.py`, `tests/test_camera.py`, `tests/test_overlay.py`,
+`tests/test_webcam.py`, `tests/test_visual_observability.py`.
+Modificados: cursor.py, cursor_controller.py, temporal.py, test_cursor.py,
+pyproject.toml, README, ARCHITECTURE.md e este plano. AGENTS.md, MODELS.md,
+HandTracker, matemática, heurísticas/thresholds e demo sintética preservados.
+
+Fluxo efetivo: Camera BGR → espelhamento OpenCV → cvtColor(BGR2RGB) → HandTracker
+IMAGE/CPU → DetectedHand escolhido → GestureDetector → TemporalGestureFilter
+→ CursorController → DryRunCursorSink → overlay sobre BGR → janela OpenCV.
+Entrada original preservada; inferência sempre antes do desenho. Tracker não
+teve contrato alterado. Dimensões reais corrigem aspecto de GestureConfig;
+mudança de dimensões reinicia DISABLED. Não se consulta monitor; tela lógica
+1920×1080 configurável. Resolução solicitada padrão 640×480.
+
+Seleção: maior handedness_score, empate/ausência usa primeira mão. O score é
+confiança Left/Right, **não** confiança de detecção; o overlay explicita isso.
+Tracker padrão retorna até uma mão. Sem tracking de identidade entre mãos.
+Reset R e habilitação E necessários ao trocar de mão explicitamente.
+
+Observabilidade acrescentada sem acesso a campos privados: controller.observation
+e position; TemporalStatus imutável candidate/stable/armed/cooldown_active,
+sem leitura adicional de clock. ENABLED reutiliza a mesma observação das regras;
+DISABLED avalia RAW somente na integração para exibição. Sink usa deque e
+limite opcional validado; default sem limite preservado, demo usa max_history=1.
+
+Overlay: HGI/DRY-RUN, CONTROL ENABLED/DISABLED, mão/score opcional, RAW/STABLE,
+candidato, armamento/cooldown, razão de pinça, cursor/Action, FPS, 21 landmarks
+com conexões, indicador destacado e feedback de PINCH, área ativa 0.1..0.9,
+indicador normalizado e screen target sem EMA, instruções de encerramento.
+Textos sobre fundo escuro foram inspecionados em render sintético de 640×480
+em `/tmp` (sem câmera), após revisão do contraste. Cursor exibe posição retida
+pelo controller, diferente do target bruto. CLICK é evento de um frame.
+
+Teclas E/D/R/Q/Esc somente via waitKey com foco na janela. E habilita intenções
+virtuais; D/R desabilitam e limpam; Q/Esc/fechar janela encerram. Não existe
+`--control`. CLI valida modelo local e aponta MODELS.md se ausente. Não há
+download de modelo em runtime. Context managers/finally liberam câmera/tracker
+e janelas; falhas inesperadas desabilitam e propagam sem falsa ausência de mão.
+FPS simples usa monotonic na aplicação, com uma amostra de atraso, separado
+do clock temporal. Não representa latência isolada de inferência.
+
+### TDD e checkpoints locais
+
+| Incremento | RED observado | GREEN observado | Commits na branch mais |
+|---|---|---|---|
+| Camera/ciclo de vida | pytest test_camera.py: 1 erro de coleta por módulo HGI ausente | 15 passaram, lint aprovado | `a7b1c94` → `cc17a91` |
+| Overlay/pipeline | pytest test_overlay.py/test_webcam.py: 2 erros de coleta por módulos HGI ausentes | 28 passaram junto a test_visual_observability.py; suíte total 349 | `569be30` → `feae4e6` |
+| Observabilidade/retenção | pytest test_visual_observability.py: 6 falhas em runtime, APIs ausentes | 6 passaram dentro do grupo anterior | Mesmos checkpoints do pipeline |
+| Revisão/refactor | Suíte já verde; garantias de limpeza/CLI ampliadas, sem alegar RED novo | 354 passaram; render legível e APIs tipadas | `67e25f3` |
+
+Os RED de coleta são ausência intencional de implementação, não dependência
+quebrada. Nenhum teste de lógica foi substituído por mock. Mocks somente em
+fronteiras de capture/tracker/janela; desenho OpenCV, geometria, detector,
+temporalidade, mapeamento, EMA e sink são reais. Sem webcam/display no pytest.
+Os checkpoints são locais, alcançáveis pelo HEAD atual, sem squash/push/PR.
+
+| Garantia / jornada da demo | Teste e tipo | Resultado |
+|---|---|---|
+| Abrir/ler BGR, respeitar dimensões entregues, rejeitar frames inválidos e liberar sob erro | test_camera.py, capture fake | 15 PASS |
+| Mão ausente/score opcional, formatos válidos, 21 pontos, indicador e região reais, rótulos de estados | test_overlay.py, arrays/OpenCV nativo/spy de desenho | 11 PASS |
+| RGB correto, espelhamento coerente, seleção, POINT estabilizado, CLICK virtual único, ausência, teclas e retenção | test_webcam.py, pipeline completo com tracker fake | PASS |
+| Falhas de inferência/setup/tracker/imshow/waitKey, botão fechar e ausência de display/modelo | test_webcam.py, recursos nativos fake | PASS |
+| CLI ajuda/modelo ausente e rejeição de --control | test_webcam.py, main sem webcam | PASS |
+| Retenção limitada em ordem e rejeição de limites inválidos; status/position/observation não avançam o clock | test_visual_observability.py, puro | 6 PASS |
+
+test_webcam.py possui 16 testes no total. **48 testes novos**, 354 no total.
+Erro encontrado na integração: allowlist de biblioteca padrão do teste de
+fronteira do cursor não incluía collections. Adicionado somente collections
+para deque, preservando a proibição de dispositivos. Ruff apontou linhas longas
+e import não usado; todos corrigidos sem desativar regras. Revisão Python
+acrescentou anotação de retorno ao construtor Camera e contraste do texto.
+
+### Verification-loop, python-reviewer e security-review
+
+Todos os comandos abaixo usam o Python do ambiente Conda hgi mencionado acima.
+No shell ativado, equivalem literalmente aos comandos solicitados pelo usuário.
+
+| Comando / revisão executado | Evidência real |
+|---|---|
+| `python -m pytest -q` | 354 PASS; zero skips/falhas |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 99% total; 808 instruções, 9 ausentes; 204 branches, 5 parciais |
+| Cobertura de módulos novos | camera 92%, overlay 100%, webcam 96%; linhas/branches HGI, não OpenCV nativo |
+| Cobertura de lógica principal | geometria/smoothing/dedos/cursor/controller 100%; detector 98%, temporal 99% |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | PASS; nenhum requisito quebrado |
+| `python -c "import cv2; print(cv2.__version__)"` | 5.0.0 final; somente contrib 5.0.0.93 com GUI QT5 |
+| `python -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir /tmp/hgi-phase7-wheels .` | PASS; wheel HGI offline, sem instalar outras dependências |
+| Inspeção da wheel e links locais | PASS; camera/overlay/webcam incluídos, requisito somente contrib, sem modelo/vídeo/imagem no pacote |
+| `python scripts/demo_webcam.py --help` | PASS; flags locais/dimensões/modelo, sem flag de automação |
+| `python scripts/demo_webcam.py --model /tmp/hgi-phase7-missing.task` | Exit 1 esperado, mensagem clara com docs/MODELS.md; nenhum hardware aberto |
+| python-reviewer e inspeção AST/tipos/diff | Sem CRITICAL/HIGH pendente; responsabilidades, estado, erros/recursos revisados |
+| security-review e scan AST de src/hgi/scripts | Zero imports/calls proibidos; somente captura/desenho/janela e leitura de DISPLAY/WAYLAND_DISPLAY na integração |
+| Scan limitado de segredos e APIs de ação | Sem achados nos arquivos de aplicação/demo; diretórios de credenciais não inspecionados |
+| Execução da CLI com modelo ausente e inspeção de sys.modules | PASS; sem imports PyAutoGUI/pyperclip/keyboard/pynput |
+| git diff --check e revisão dos arquivos da fase | PASS; somente escopo autorizado |
+
+Mypy/Pyright/Bandit não estão instalados; revisão de tipos foi manual, sem
+alegar execução dessas ferramentas ou auditoria de vulnerabilidades do fornecedor.
+Gaps de cobertura são defesas de shutdown/entrada nativa, configurações inválidas,
+loop com múltiplas iterações de janela e dois caminhos anteriores; não foram
+adicionados testes artificiais para 100%. Não se mede qualidade de tracking por
+cobertura. `/quality-gate --strict` pertence ao fechamento do MVP, que não é
+esta fase nem foi declarado pronto.
+
+Segurança confirmada: runtime HGI não importa PyAutoGUI, não move/clica mouse
+real, não envia teclas globais, não usa clipboard, não executa comandos externos,
+não consulta dados sensíveis e não salva/transmite frames. Somente waitKey lê
+teclas recebidas pela janela. Sessão inicial DISABLED; backend sempre dry-run,
+inclusive ENABLED. Nenhuma resolução de monitor consultada. MediaPipe mantém
+a ressalva de métricas do fornecedor já documentada em MODELS.md; tráfego nativo
+da dependência não foi auditado, sem acrescentar telemetria HGI.
+
+Fontes documentation-lookup (Context7 indisponível, fallback oficial):
+[OpenCV packaging](https://pypi.org/project/opencv-contrib-python/),
+[VideoCapture/read/release](https://docs.opencv.org/4.x/dd/d43/tutorial_py_video_display.html),
+[HighGUI/waitKey](https://docs.opencv.org/4.x/d7/dfc/group__highgui.html),
+[conversões de cores](https://docs.opencv.org/4.x/d8/d01/group__imgproc__color__conversions.html).
+Os guias redirecionaram para 4.13.0; as chamadas utilizadas foram confirmadas
+na instalação 5.0.0 pelos testes nativos em arrays. HandTracker/API preservados.
+
+### Smoke manual e observação exploratória
+
+**Estado da fase: implementação/verificação automatizada entregues; aceite
+visual humano pendente.** `ls -l /dev/video*` não encontrou dispositivos. A demo
+não foi aberta com câmera real, e nenhum resultado de detecção humana foi
+fabricado. Ausência de dispositivo não foi classificada como falha do código.
+
+| Verificação manual | Estado nesta sessão |
+|---|---|
+| Câmera abre / imagem exibida | Não testado: sem dispositivo |
+| Mão detectada / 21 landmarks acompanham / handedness correto | Pendente de webcam |
+| POINT / PINCH reais e estabilização perceptível | Pendente; somente fixtures sintéticas passaram |
+| Cursor virtual / área ativa / direção / jitter | Pendente visual; matemática e pipeline passaram automaticamente |
+| FPS / latência percebida / falsos PINCH | Não medidos com webcam; 27.4 nos testes é dado sintético |
+| Ausência de ações reais | Confirmada por implementação/revisão, sem backend de automação |
+
+Para concluir o aceite manual na máquina com webcam: executar ls antes da demo;
+preparar modelo segundo MODELS.md; abrir `python scripts/demo_webcam.py --model
+/caminho/hand_landmarker.task`; observar mão/landmarks/handedness; pressionar E;
+testar POINT, pinça curta e mantida, reabertura, perda/reaquisição; inspecionar
+RAW/STABLE, candidato, armamento e cooldown; testar D/R/E e Q/Esc/fechar janela.
+Anotar FPS, comportamento do indicador virtual e quaisquer falsos reconhecimentos.
+
+| Parâmetro/default | Comportamento observado em webcam | Sugestão |
+|---|---|---|
+| Pinça fecha 0.25 / abre 0.32 | Não observado | Manter até medir razão/falsos PINCH |
+| Estabilização 80 ms / cooldown 300 ms / grace 150 ms | Não observado | Manter até smoke humano |
+| Área 0.1..0.9 / EMA alpha 0.25 | Não observado | Manter até avaliar ergonomia/jitter |
+
+Nenhum threshold recalibrado automaticamente. Não foram encontrados problemas
+de detecção humana porque ela não pôde ser testada. Limites: IMAGE sem otimização
+VIDEO; classificação geométrica 2D/oclusões; handedness sem identidade; foco da
+janela e backend gráfico necessários; captura/inferência nativa bloqueada pode
+atrasar Q/Esc; falhas nativas de plugin/driver podem ocorrer fora das exceções
+Python. Não se promete suporte gráfico em todo ambiente Wayland/headless.
+
+**Próximo passo recomendado:** terminar o smoke/calibração exploratória da
+própria Fase 7 com webcam. Depois, discutir autorização e plano específicos de
+backend real/fail-safe, ainda adiados. Fase 8/extras, publicação e controle real
+não foram iniciados. O MVP completo permanece pendente.

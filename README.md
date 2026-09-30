@@ -1,13 +1,15 @@
 # HGI — Hand Gesture Interface
 
 Projeto local de visão computacional para interpretar gestos da mão.
-**Fase concluída: proteção temporal e opt-in lógico em dry-run.** O comando abaixo apenas
-identifica o projeto. O tracker processa frames RGB fornecidos pelo chamador;
-captura de webcam, pipeline contínuo e controle do mouse ainda não estão integrados.
+**Fase 7 implementada: webcam, overlay e pipeline completo em dry-run.**
+A demo visual interpreta a mão e mostra intenções virtuais. A validação com
+webcam humana permanece pendente nesta sessão, pois não há `/dev/video*`.
+`python -m hgi` continua sendo o entrypoint mínimo que identifica o projeto.
 
 Requer Python **3.11 ou superior**. O bootstrap usa somente a biblioteca padrão.
 Os módulos matemáticos também usam apenas Python, com dimensões fornecidas pelo chamador.
-O extra `vision` declara MediaPipe 1.0.1 e NumPy; o ambiente validado usa Python 3.11.16.
+O extra `vision` declara MediaPipe 1.0.1, NumPy e opencv-contrib-python 5.0.0.93
+com GUI; o ambiente validado usa Python 3.11.16.
 
 ## Instalação e execução
 
@@ -22,6 +24,9 @@ python -m hgi
 
 No Windows, ative com `.venv\Scripts\Activate.ps1` no PowerShell.
 O comando imprime `HGI — Hand Gesture Interface` e encerra.
+
+No ambiente Conda existente desta máquina, use `conda activate hgi` antes dos
+comandos: o Python padrão do shell pertence ao ambiente base, não ao HGI.
 
 Se pytest, pytest-cov, Ruff e setuptools já estiverem disponíveis no ambiente
 (como no Conda `hgi` inspecionado, incluindo NumPy e MediaPipe), registre somente
@@ -44,13 +49,88 @@ python -m compileall src
 python -m pip check
 ```
 
-O ambiente inspecionado contém `opencv-python` e `opencv-contrib-python`, ambos
-5.0.0.93, sem variantes headless. Os dois compartilham `cv2`; o MediaPipe 1.0.1
-instalado requer a variante contrib. Nenhum pacote foi removido. Resolver a
-sobreposição em uma manutenção posterior: ela não bloqueou a inferência IMAGE
-desta fase. Preferir somente contrib, requerido pelo MediaPipe, reparando seus
-arquivos após a remoção da outra distribuição. Nenhuma alteração foi realizada.
-`pip check` não detecta sobreposição de arquivos; o bootstrap continua sem imports de visão.
+O ambiente HGI agora contém somente **opencv-contrib-python 5.0.0.93**, sem
+variantes headless, com `cv2.__version__ == "5.0.0"` e GUI QT5. Não instale
+opencv-python junto: compartilham arquivos e o namespace cv2. MediaPipe exige
+contrib, que já contém os módulos principais. Na manutenção desta fase, a
+remoção inicial apagou arquivos compartilhados; foi revertida, e contrib foi
+reparado na mesma versão após nova remoção de python. Nenhuma outra dependência
+foi alterada. `pip check` e o import final passaram; detalhes no plano.
+
+## Demo visual com webcam — somente dry-run
+
+Prepare explicitamente o modelo conforme [MODELS.md](docs/MODELS.md). Na raiz,
+com o ambiente ativado e HGI instalado:
+
+```bash
+python scripts/demo_webcam.py
+```
+
+O caminho padrão é `models/hand_landmarker.task`. Para outro caminho/câmera ou
+dimensões solicitadas e tela lógica diferentes:
+
+```bash
+python scripts/demo_webcam.py --model /caminho/hand_landmarker.task --camera 0 \
+  --width 640 --height 480 --screen-width 1920 --screen-height 1080
+```
+
+Não há download automático. Modelo ausente encerra com mensagem apontando para
+MODELS.md. As dimensões da tela são lógicas; nenhum monitor real é consultado.
+A câmera pode ignorar a resolução pedida: a integração usa `frame.shape` para
+desenho e correção de proporção das medidas. Se as dimensões entregues mudarem,
+a sessão é reiniciada DISABLED; habilite novamente com E.
+
+| Tecla com foco na janela OpenCV | Efeito |
+|---|---|
+| E | Habilita apenas intenções virtuais |
+| D | Desabilita e limpa a interação |
+| R | Reset, permanecendo DISABLED |
+| Q / Esc | Encerra e libera câmera, tracker e janelas |
+
+Também é possível fechar a janela. A sessão começa **DISABLED**; nenhuma mão
+a habilita automaticamente. `CONTROL: ENABLED` significa exclusivamente
+autorizar a saída dry-run. A demo não aceita `--control` e não importa PyAutoGUI.
+MOVE/CLICK são dataclasses em memória; nenhum mouse, clique ou tecla do sistema
+é acionado. Teclas são lidas somente por `cv2.waitKey`, na janela da demo.
+Não são gravados nem transmitidos frames pelo código HGI.
+
+O overlay mostra modo, handedness/confiança Left/Right, RAW/STABLE, candidato,
+armamento/cooldown, razão de pinça, cursor virtual/ação e FPS. Desenha os 21
+landmarks com conexões, realça o indicador e marca a região ativa de 10% a 90%.
+`Index normalized` é a posição no frame espelhado; `screen target` é o alvo
+mapeado antes da suavização; `Cursor` é a posição virtual retida pelo controller.
+CLICK aparece somente no frame do evento. FPS é a frequência do loop, mostrada
+com uma amostra de atraso; não é uma medição isolada de latência do modelo.
+
+O frame é espelhado **antes** da inferência; o controller usa `mirror_x=False`.
+Seleção: maior `handedness_score`, primeira mão em empate/ausência; esse score
+mede classificação Left/Right, não confiança de detecção. O tracker usa uma mão
+por padrão. Não há identidade persistente; ao trocar de mão, use R e depois E.
+As regras e thresholds das fases anteriores foram preservados.
+
+| Gesto/estado | Saída virtual quando ENABLED |
+|---|---|
+| POINT confirmado, pinça aberta | MOVE com margem e EMA |
+| PINCH confirmado, armado e fora do cooldown | Um CLICK no último alvo virtual |
+| PINCH mantido / cooldown bloqueado | NONE, sem clique pendente |
+| Sem mão / DISABLED | NONE |
+| OPEN_HAND, FIST ou UNKNOWN confirmados | NONE e limpeza do movimento |
+
+Exige webcam acessível e sessão gráfica funcional com OpenCV GUI. No Linux,
+ausência de DISPLAY/WAYLAND_DISPLAY produz erro claro antes da captura. Variável
+presente não garante conexão/driver/plugin gráfico funcional; a wheel QT5 deste
+ambiente usa X11/XWayland conforme suporte local. Windows/macOS podem exigir
+permissão de câmera. Esta demo não precisa de permissão para automação de entrada.
+Falhas de captura/inferência/desenho encerram com limpeza; geometria degenerada
+gera erro explícito, em vez de inventar um gesto. Q/Esc são processados entre
+frames; captura ou inferência nativa bloqueada pode atrasar a resposta.
+
+Validação automatizada: **354 testes**, **99% de cobertura total**, Ruff check e
+format aprovados. Testes de câmera/janela usam fakes; o overlay usa OpenCV real
+sobre arrays sintéticos sem display. POINT/PINCH foram validados sinteticamente.
+FPS real, lateralidade, ergonomia, jitter e qualidade de detecção humana ainda
+exigem webcam. IMAGE continua síncrono, sem otimização temporal do modo VIDEO.
+Veja o roteiro manual e evidências em [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
 
 ## Matemática disponível
 
@@ -83,7 +163,8 @@ with HandTracker("models/hand_landmarker.task") as tracker:
 A entrada é RGB, `uint8`, `H × W × 3`; retorno vazio é `()`. O modo IMAGE é
 síncrono e não exige timestamps. Os resultados contêm 21 pontos XYZ próprios do
 HGI. A ordem de cores depende do chamador; um array BGR não pode ser identificado
-automaticamente pelo formato. Não há loop de webcam nem teste real de mão nesta sessão.
+automaticamente pelo formato. A conversão BGR→RGB ocorre explicitamente na demo;
+nenhum teste de mão humana foi realizado nesta sessão.
 
 ## Reconhecimento geométrico disponível
 
@@ -148,4 +229,6 @@ python scripts/demo_cursor.py
 
 Veja os contratos e limitações em [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 e [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
-A Fase 7 e o controle real não foram iniciados.
+A implementação da Fase 7 termina nesta integração dry-run; o controle real
+continua adiado e exige autorização própria. Próximo passo: smoke com webcam
+e observação exploratória dos defaults, antes de qualquer backend real ou extras.

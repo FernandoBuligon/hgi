@@ -1,4 +1,4 @@
-# Arquitetura do HGI — estado após a Fase 6
+# Arquitetura do HGI — estado após a implementação da Fase 7
 
 O núcleo matemático usa somente a biblioteca padrão Python. O entrypoint identifica o
 projeto e encerra. Geometria e smoothing não fazem I/O, não consultam relógio/FPS,
@@ -8,6 +8,7 @@ O modelo interno de mão e o reconhecimento geométrico usam somente Python padr
 O cursor virtual exige enable explícito e filtra temporalmente as observações.
 Começa DISABLED e emite somente intenções para um sink em memória. Ações reais
 permanecem propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
+A demo visual dedicada integra webcam e OpenCV com esse núcleo em dry-run.
 
 ## API atual
 
@@ -95,7 +96,7 @@ flowchart LR
 `process(frame)` recebe `numpy.ndarray`, RGB, `uint8`, H×W×3, com eixos positivos.
 Entradas inválidas geram TypeError/ValueError antes da inferência. Arrays strided
 são tornados contíguos; RGB e entrada são preservados. Não se pode inferir RGB
-versus BGR apenas por dtype/shape: a conversão pertence ao futuro módulo de captura.
+versus BGR apenas por dtype/shape: a conversão pertence à integração webcam.py.
 
 `HandTracker(model_path, *, num_hands=1, min_hand_detection_confidence=0.5,
 min_hand_presence_confidence=0.5)` configura CPU e **IMAGE** síncrono. Modelo
@@ -151,7 +152,7 @@ flowchart LR
     G --> H[Gesture]
 ```
 
-Esse fluxo representa as interfaces disponíveis, ainda sem loop integrado.
+Esse fluxo detalha o reconhecimento utilizado pelo loop visual da Fase 7.
 `finger_state.py` reúne configuração, estado nomeado e medidas geométricas da
 mão, inclusive pinch_ratio; `gesture_detector.py` converte essas medidas em
 rótulos. Nenhum dos dois importa o tracker, NumPy, MediaPipe, OpenCV ou automação.
@@ -288,15 +289,15 @@ O chamador fornece uma mão interna ou None. Quando habilitado, o controller
 chama detector/filtro temporal injetados e reúne mapeamento/EMA, sem conhecer o
 tracker ou qualquer biblioteca de visão. `cursor.py` contém os dados e a fronteira de saída; `cursor_controller.py`
 contém configuração e estado lógico. O relógio pertence somente ao filtro temporal.
-Não há backend real, webcam, consulta ao monitor, automação de entrada ou
-integração com o entrypoint de captura.
+Essa camada não contém backend real, webcam, consulta ao monitor ou automação.
+A integração com captura/exibição pertence a webcam.py e à demo dedicada.
 
 | API | Contrato |
 |---|---|
 | `CursorAction` | Enum MOVE, CLICK, NONE; somente intenções |
 | `CursorCommand(action, x=None, y=None, gesture=None)` | Dataclass imutável; MOVE/CLICK exigem X/Y finitos e não negativos; NONE exige X/Y ausentes; gesto opcional e tipado |
 | `CursorSink.emit(command)` | Protocol de um método; não exige herança ou framework |
-| `DryRunCursorSink()` | Recebe todos os comandos, inclusive NONE, armazenando em ordem na memória |
+| `DryRunCursorSink(max_history=None)` | Recebe todos os comandos, inclusive NONE; limite opcional descarta os mais antigos |
 | `sink.commands` | Snapshot tuple imutável; não expõe a lista interna |
 | `CursorConfig(screen_width, screen_height, ...)` | Dataclass imutável e validada; dimensões lógicas fornecidas explicitamente |
 | `CursorController(config, *, sink=None, detector=None, temporal=None)` | Começa DISABLED; usa somente DryRunCursorSink, detector/filtro padrão e EMA própria |
@@ -305,6 +306,7 @@ integração com o entrypoint de captura.
 | `controller.reset()` | Desabilita e limpa EMA, posição e todo estado temporal; preserva histórico do sink |
 | `controller.state` | ControlState.DISABLED ou ENABLED, somente leitura; ENABLED continua dry-run |
 | `controller.config` / `controller.sink` | Propriedades somente leitura para inspeção |
+| `controller.observation` / `controller.position` | Última observação habilitada e posição virtual; snapshots imutáveis, sem consultas externas |
 
 ### POINT, margens, pixels e espelhamento
 
@@ -390,10 +392,11 @@ Limites conhecidos: ruído sustentado além dos limiares/duração pode produzir
 gestos incorretos. Os defaults não foram calibrados com hardware. Não há
 identidade persistente. Troca de mão sem perda explícita exige reset
 pelo chamador. Controller/sink são sequenciais, sem garantia entre threads.
-O histórico do sink cresce sem limite, adequado a testes/demos finitas;
-um futuro loop contínuo precisará de saída limitada ou sem retenção integral.
+O histórico do sink cresce sem limite por padrão, adequado a testes/demos finitas;
+a demo contínua usa max_history=1, mantendo somente o último comando.
 Ergonomia, precisão das heurísticas e espelhamento da captura real continuam
-dependendo de validação manual posterior. Controle real e Fase 7 não foram iniciados.
+dependendo de validação manual posterior. Controle real permanece adiado;
+a integração da Fase 7 está descrita abaixo.
 
 ## Proteção temporal e opt-in
 
@@ -482,6 +485,94 @@ estado; sessões devem usar controller.reset para limpar também opt-in e EMA.
 
 O sink permanece exclusivamente DryRunCursorSink; ControlState.ENABLED significa
 autorizar intenções virtuais. Não foi implementado PyAutoGUI, mouse, teclado,
-webcam, consulta de resolução, GUI ou configuração persistente. Antes do controle
-real ainda serão necessários backend/fail-safe, integração de captura e QA manual
-autorizados separadamente. O MVP completo continua pendente.
+consulta de monitor ou configuração persistente. A Fase 7 acrescenta captura e
+GUI em dry-run. Antes do controle real ainda serão necessários backend/fail-safe
+e QA manual autorizados separadamente. O MVP completo continua pendente.
+
+## Integração visual da Fase 7
+
+```mermaid
+flowchart LR
+    A[Webcam] --> B[Camera: BGR uint8]
+    B --> M[OpenCV: espelhar BGR]
+    M --> C[OpenCV: BGR para RGB]
+    C --> T[HandTracker: IMAGE / CPU]
+    T --> H[DetectedHand: seleção]
+    H --> G[GestureDetector]
+    G --> F[TemporalGestureFilter]
+    F --> K[CursorController: opt-in / EMA]
+    K --> S[DryRunCursorSink: último comando]
+    M --> O[Overlay: BGR]
+    H --> O
+    G --> O
+    F --> O
+    K --> O
+    O --> W[Janela OpenCV]
+    W --> E[waitKey: E / D / R / Q / Esc]
+    E --> K
+```
+
+- `camera.py`: única fronteira de VideoCapture, índice/resolução solicitados,
+  BGR uint8 validado, erros claros e context manager. Não converte cores, infere
+  ou desenha. Falha de leitura encerra, sem loop silencioso ou frame falso.
+- `webcam.py`: DemoConfig imutável; WebcamPipeline reutiliza tracker e sessão,
+  usa dimensões efetivas, espelha BGR e converte explicitamente com cvtColor.
+  A inferência RGB acontece antes do desenho. Só a borda depende de cv2/NumPy.
+- Seleção: maior handedness_score, primeira em empate/ausência. A confiança é
+  de Left/Right, não detecção; não existe identidade persistente. Tracker usa
+  uma mão por padrão; troca humana de mão requer R e E.
+- `overlay.py`: recebe OverlayState imutável e CursorConfig, usa índices/conexões
+  HGI e primitivas OpenCV, sem utilities MediaPipe. Altera o BGR de exibição
+  em memória sem modificar dimensões. Nenhuma imagem é salva pelo runtime.
+- `scripts/demo_webcam.py`: argparse, configuração e diagnóstico de erros
+  conhecidos. Modelo ausente aponta para MODELS.md. Não abre hardware ao importar,
+  não possui flag de backend real e `--help` não carrega bibliotecas de visão.
+
+Dimensões da captura podem diferir das solicitadas (640×480 por padrão).
+`frame.shape` define proporção para GestureConfig e transformação para pixels
+do overlay. Mudança de dimensões descarta sessão anterior e começa DISABLED.
+O modelo pesado não é reconstruído por frame. A tela lógica padrão é 1920×1080;
+nenhuma consulta de monitor. Margens de 0.1..0.9 e alpha 0.25 permanecem iguais.
+
+Espelhamento é feito antes do tracker; portanto mirror_x=False no controller
+da demo, evitando reflexão duplicada. A entrada original de Camera permanece
+inalterada. A cópia para espelhamento é necessária para a orientação de exibição;
+não há cópias adicionais de frames para histórico/log. Handedness da imagem
+espelhada ainda precisa de validação com mão humana.
+
+Quando ENABLED, controller.observation expõe a medição que já alimentou o filtro,
+sem recalcular geometria. Quando DISABLED, somente a integração avalia RAW para
+o overlay; o controller permanece neutro e não lê o clock temporal. `position`
+expõe o último alvo virtual suavizado/congelado. `TemporalStatus` expõe candidate,
+stable, armed e cooldown_active imutáveis com o último timestamp amostrado;
+ler status não chama clock nem avança a máquina de estados. Reset/disable limpam
+também a observação. Não há acesso aos campos privados do filtro pelo overlay.
+
+FPS usa monotonic na aplicação, separado do clock do filtro. É 1/intervalo entre
+iterações e aparece com uma amostra de atraso (primeira: zero). Inclui captura,
+inferência e trabalho de exibição anterior; não prova latência ponta a ponta.
+O sink da demo usa deque(maxlen=1); o default público continua sem limite para
+compatibilidade com os testes/demos finitas anteriores.
+
+O overlay distingue CONTROL: ENABLED/DISABLED de DRY-RUN, mostrando mão,
+score Left/Right, RAW/STABLE, candidato, armamento/cooldown, pinch_ratio, posição
+virtual, Action e FPS. São 21 pontos com conexões, destaque do indicador e
+feedback amarelo de PINCH. `Index normalized` descreve o indicador atual;
+`screen target` é mapeado sem EMA, `Cursor` é a posição retida pelo controller.
+Textos possuem fundo escuro para contraste, região ativa indica toda a tela
+lógica e rodapé informa controles locais. CLICK é mostrado no frame do evento.
+
+run_webcam valida modelo e sessão gráfica antes da captura. Context managers
+liberam câmera/tracker sob falhas; finally desabilita e destrói janelas. Erros
+inesperados são relançados; não viram ausência de mão. Q/Esc e fechamento da
+janela encerram; E habilita somente intenções, D/R desabilitam/limpam. waitKey
+é a única leitura de teclado. Não há mouse/clique/tecla real, clipboard, comando
+externo, consulta sensível ou gravação/transmissão de frames no código HGI.
+
+Teste normal usa frames sintéticos, fake tracker/captura/janela e geometria,
+temporalidade, sink e desenho reais. Native OpenCV sobre arrays não exige display.
+Teste humano está pendente pela ausência de /dev/video*. IMAGE não aproveita
+tracking temporal de VIDEO; FPS real e ergonomia não foram homologados.
+Plugins/display ou drivers nativos defeituosos podem falhar fora das exceções
+Python. Q/Esc são lidos entre frames; bloqueio nativo de captura/inferência pode
+atrasar encerramento. Nenhum threshold foi recalibrado ou feature extra adicionada.
