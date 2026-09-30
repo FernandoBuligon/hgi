@@ -7,15 +7,34 @@ from pathlib import Path
 
 def _parser() -> argparse.ArgumentParser:
     """Describe explicit output opt-in without importing hardware libraries."""
-    parser = argparse.ArgumentParser(description="HGI webcam - DRY-RUN by default")
-    parser.add_argument(
-        "--model", type=Path, default=Path("models/hand_landmarker.task")
+    parser = argparse.ArgumentParser(
+        description="HGI webcam - DRY-RUN by default; session starts DISABLED",
+        epilog="Window controls: E enable, D disable, R reset + disable, Q/Esc quit.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--camera", type=int, default=0)
-    parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--screen-width", type=int)
-    parser.add_argument("--screen-height", type=int)
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=Path("models/hand_landmarker.task"),
+        help="local MediaPipe model; prepare it explicitly using docs/MODELS.md",
+    )
+    parser.add_argument("--camera", type=int, default=0, help="webcam device index")
+    parser.add_argument(
+        "--width", type=int, default=640, help="requested camera width in pixels"
+    )
+    parser.add_argument(
+        "--height", type=int, default=480, help="requested camera height in pixels"
+    )
+    parser.add_argument(
+        "--screen-width",
+        type=int,
+        help="paired with --screen-height; logical pixels, or real screen override",
+    )
+    parser.add_argument(
+        "--screen-height",
+        type=int,
+        help="paired with --screen-width; default: 1920x1080 dry-run, detected if real",
+    )
     parser.add_argument(
         "--real-control",
         action="store_true",
@@ -40,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as error:
         print(
             f"Vision dependencies unavailable: {error}. "
-            "Install HGI [vision]; see README.md.",
+            'Install with: python -m pip install -e ".[vision]"; see README.md.',
             file=sys.stderr,
         )
         return 1
@@ -66,6 +85,12 @@ def main(argv: list[str] | None = None) -> int:
         cv2.error,
     ) as error:
         print(f"HGI: {error}", file=sys.stderr)
+        if isinstance(error, CameraError):
+            alternative = 1 if args.camera == 0 else 0
+            print(
+                f"Try another camera index, for example: --camera {alternative}",
+                file=sys.stderr,
+            )
         return 1
     except KeyboardInterrupt:
         return 0

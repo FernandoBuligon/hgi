@@ -1,4 +1,4 @@
-"""Minimal entrypoint for the HGI bootstrap."""
+"""Package identification without initializing camera or mouse backends."""
 
 
 def main() -> None:
