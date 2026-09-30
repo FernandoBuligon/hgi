@@ -83,6 +83,20 @@ def test_coincident_joint_is_rejected(
         detect_fingers(replace(hand, landmarks=tuple(points)))
 
 
+def test_straight_chain_pointing_toward_wrist_is_not_extended(
+    hand_factory: Callable[..., DetectedHand],
+) -> None:
+    hand = hand_factory("index")
+    points = list(hand.landmarks)
+    for index, y in (
+        (HandLandmark.INDEX_FINGER_PIP, 0.6875),
+        (HandLandmark.INDEX_FINGER_DIP, 0.75),
+        (HandLandmark.INDEX_FINGER_TIP, 0.8125),
+    ):
+        points[index] = NormalizedLandmark(0.375, y, 0)
+    assert not detect_fingers(replace(hand, landmarks=tuple(points))).index
+
+
 def test_invalid_hand_size_is_rejected_by_internal_type(
     hand_factory: Callable[..., DetectedHand],
 ) -> None:
