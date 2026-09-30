@@ -242,6 +242,26 @@ def test_cli_help_absent_model_and_forbidden_control_flag(tmp_path, capsys):
     assert control_exit.value.code == 2
 
 
+@pytest.mark.parametrize("camera_index, alternative", [(0, 1), (1, 0)])
+def test_cli_camera_failure_suggests_alternative_without_retry(
+    monkeypatch, capsys, camera_index, alternative
+):
+    import runpy
+
+    import hgi.webcam as webcam
+    from hgi.camera import CameraError
+
+    run = Mock(side_effect=CameraError(f"Could not open camera {camera_index}"))
+    monkeypatch.setattr(webcam, "run_webcam", run)
+    main = runpy.run_path("scripts/demo_webcam.py")["main"]
+
+    assert main(["--camera", str(camera_index)]) == 1
+    message = capsys.readouterr().err
+    assert f"Could not open camera {camera_index}" in message
+    assert f"--camera {alternative}" in message
+    run.assert_called_once()
+
+
 def test_ui_click_persistence_does_not_repeat_commands_or_advance_temporal_clock(
     hand_factory, fake_clock
 ):

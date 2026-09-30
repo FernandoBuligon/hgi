@@ -2,18 +2,18 @@
 
 ## 1. Escopo e autorização
 
-Fonte de requisitos: [AGENTS.md](../AGENTS.md). O HGI será uma aplicação local
+Fonte de requisitos: [AGENTS.md](../AGENTS.md). O HGI é uma aplicação local
 de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
-Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente as **Fases 1 a 5**, registradas nas seções 9 a 13, e agora somente
-a **Fase 7 — integração visual com webcam, overlay e pipeline dry-run**, com
-plano e evidências na seção 15. A Fase 6 está registrada na seção 14.
-O usuário adiou explicitamente mouse real/PyAutoGUI. As fases 8–10 continuam
-propostas, sem autorização. Na Fase 3, o modelo foi adquirido
-explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
-automação, gravação de frames ou publicação.
+Este documento foi criado na **Fase 0**. As Fases 1–8 foram implementadas
+conforme as autorizações posteriores do usuário, com evidências nas seções 9–16.
+A autorização atual é somente a **Fase 9 — polimento técnico, documentação e
+preparação para portfólio**, registrada na seção 17. A numeração vigente segue
+esses pedidos: Fase 6 temporalidade, Fase 7 integração visual e Fase 8 backend
+real. Não corresponde à sequência original de extras do AGENTS.md.
+Aceites com webcam e mouse humano continuam pendentes. Não há autorização para
+novas funcionalidades, tag, push ou publicação de release nesta fase.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
@@ -1442,3 +1442,36 @@ monitor físico escolhido. Windows/macOS e ergonomia não homologados. Gestos
 2D/IMAGE mantêm limitações anteriores de ruído/oclusão/FPS. Nenhum threshold
 recalibrado. **Próximo passo recomendado: concluir aceite manual da própria
 Fase 8; só depois planejar a próxima fase sob nova autorização.**
+
+## 17. Fase 9 — polimento e preparação para portfólio
+
+### Auditoria e plano de execução — 30/09/2026
+
+Leitura integral de AGENTS.md, plano, arquitetura, modelos, README, pyproject,
+todos os módulos de src/hgi e ambos os scripts. Base: commit 0a26b52, branch
+mais, árvore limpa. Baseline: 403 testes aprovados; pip check aprovado; nenhum
+/dev/video* acessível. Nenhum movimento ou clique real foi executado.
+
+Achados: resumo do plano ainda anunciava backend real futuro; README misturava
+instruções atuais e histórico de manutenção; MODELS descrevia captura ainda
+futura; CLI não explicava unidades/defaults da maioria das opções; modelos eram
+ignorados apenas no primeiro nível de models/; faltavam assets e checklists de
+calibração/release. LICENSE está ausente e depende de decisão do usuário.
+
+Não foram encontrados módulos obsoletos, imports redundantes ou dependências
+diretas sem uso. demo_cursor.py permanece útil como demonstração determinística
+sem webcam; demo_webcam.py tem outra finalidade. Configurações são dataclasses
+por responsabilidade, sem necessidade de arquivo global ou grande refactor.
+
+Plano: (1) polir ajuda/erro de câmera com teste de regressão RED/GREEN;
+(2) atualizar README, modelos, arquitetura e estado do plano; (3) preparar assets,
+calibração, checklist e ignore; (4) validar instalação isolada e wheel;
+(5) executar testes, lint, cobertura, compilação, pip check e revisões ECC.
+Preservar lógica geométrica/temporal, thresholds, sinks, opt-in e fail-safe.
+
+Dependências: Python >=3.11; núcleo sem dependências; vision com MediaPipe,
+NumPy e OpenCV GUI; control com PyAutoGUI; dev com pytest/pytest-cov/Ruff e
+NumPy/OpenCV necessários aos testes sintéticos. Duplicação entre extras dev e
+vision é intencional: pytest não exige MediaPipe nativo. Somente contrib está
+instalado, 5.0.0.93, exigido também pelo MediaPipe. Nenhuma versão será atualizada
+sem evidência técnica. pyproject.toml permanece a fonte única de dependências.
