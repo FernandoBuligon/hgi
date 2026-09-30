@@ -1,7 +1,7 @@
 # HGI — Hand Gesture Interface
 
 Projeto local de visão computacional para interpretar gestos da mão.
-**Fase concluída: interpretação geométrica de dedos e gestos.** O comando abaixo apenas
+**Fase concluída: cursor virtual em dry-run.** O comando abaixo apenas
 identifica o projeto. O tracker processa frames RGB fornecidos pelo chamador;
 captura de webcam, pipeline contínuo e controle do mouse ainda não estão integrados.
 
@@ -108,5 +108,36 @@ O limiar inicial precisa de calibração com mãos reais; não é reconhecimento
 linguagem de sinais. Proporção da imagem e limites geométricos estão documentados
 em [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Veja [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
-A Fase 5 não foi iniciada.
+## Cursor virtual disponível
+
+Com `hand` contendo um DetectedHand interno (ou None), a saída é uma intenção
+inspecionável em memória, sem controlar o computador:
+
+```python
+from hgi.cursor import DryRunCursorSink
+from hgi.cursor_controller import CursorConfig, CursorController
+
+sink = DryRunCursorSink()
+controller = CursorController(CursorConfig(1920, 1080), sink=sink)
+command = controller.update(hand)
+print(command, sink.commands)
+controller.reset()
+```
+
+POINT gera MOVE após área ativa, espelhamento e EMA. PINCH gera CLICK lógico
+somente na entrada do gesto; pinça mantida e inatividade geram NONE. A área
+padrão vai de 0.1 a 0.9 nos dois eixos, com alpha 0.25. As dimensões são virtuais,
+fornecidas pelo chamador. `mirror_x=True` espera imagem não espelhada;
+desative-o se a entrada já foi espelhada. Reset limpa o estado, preservando o log.
+Perda de mão rearma a intenção de clique; proteção temporal completa permanece
+para a próxima fase. Não há backend de mouse ou consulta ao monitor.
+
+Demo finita sem webcam, depois de instalar o HGI:
+
+```bash
+python scripts/demo_cursor.py
+```
+
+Veja os contratos e limitações em [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+e [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
+A Fase 6 não foi iniciada.

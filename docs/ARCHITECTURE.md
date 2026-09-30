@@ -1,11 +1,12 @@
-# Arquitetura do HGI — estado após a Fase 4
+# Arquitetura do HGI — estado após a Fase 5
 
 O núcleo matemático usa somente a biblioteca padrão Python. O entrypoint identifica o
 projeto e encerra. Geometria e smoothing não fazem I/O, não consultam relógio/FPS,
 não obtêm dimensões reais e não importam bibliotecas de visão ou automação.
 O adaptador de visão usa NumPy e importa MediaPipe somente ao construir o tracker.
 O modelo interno de mão e o reconhecimento geométrico usam somente Python padrão.
-Ações permanecem propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
+O cursor virtual emite intenções para um sink em memória. Ações reais permanecem
+propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
 
 ## API atual
 
@@ -264,3 +265,121 @@ modela ângulos individuais; cadeias com comprimentos desiguais podem esconder
 flexão local. A vista de lado pode fazer a referência desaparecer. Nenhum desses
 limiares foi calibrado com mãos reais nesta fase. Não é reconhecimento universal
 de gestos nem de linguagem de sinais.
+
+## Cursor virtual em dry-run
+
+```mermaid
+flowchart LR
+    A[HandTracker] --> B[DetectedHand]
+    B --> C[GestureDetector]
+    B --> D[CursorController]
+    C --> D
+    D --> E[CursorCommand]
+    E --> F[DryRunCursorSink: memória]
+```
+
+O chamador fornece uma mão interna ou None. O controller chama o detector
+injetado e reúne mapeamento/EMA, sem conhecer o tracker ou qualquer biblioteca
+de visão. `cursor.py` contém os dados e a fronteira de saída; `cursor_controller.py`
+contém configuração e estado lógico. Não há backend real, relógio, webcam,
+consulta ao monitor, acesso ao SO ou integração com o entrypoint de captura.
+
+| API | Contrato |
+|---|---|
+| `CursorAction` | Enum MOVE, CLICK, NONE; somente intenções |
+| `CursorCommand(action, x=None, y=None, gesture=None)` | Dataclass imutável; MOVE/CLICK exigem X/Y finitos e não negativos; NONE exige X/Y ausentes; gesto opcional e tipado |
+| `CursorSink.emit(command)` | Protocol de um método; não exige herança ou framework |
+| `DryRunCursorSink()` | Recebe todos os comandos, inclusive NONE, armazenando em ordem na memória |
+| `sink.commands` | Snapshot tuple imutável; não expõe a lista interna |
+| `CursorConfig(screen_width, screen_height, ...)` | Dataclass imutável e validada; dimensões lógicas fornecidas explicitamente |
+| `CursorController(config, *, sink=None, detector=None)` | Usa DryRunCursorSink e GestureDetector por padrão; EMA própria por instância |
+| `controller.update(hand)` | Retorna e emite o mesmo CursorCommand uma vez por atualização válida |
+| `controller.reset()` | Limpa EMA, posição virtual e gesto anterior; preserva histórico do sink |
+| `controller.config` / `controller.sink` | Propriedades somente leitura para inspeção |
+
+### POINT, margens, pixels e espelhamento
+
+```text
+POINT → INDEX_FINGER_TIP em XY normalizado
+      → clip na região ativa
+      → normalização relativa à região
+      → espelhamento opcional de X
+      → pixels da tela lógica fornecida
+      → ExponentialSmoother
+      → clamp final → MOVE
+```
+
+Toda a matemática vem de `map_camera_to_screen`, `clamp` e
+`ExponentialSmoother`, sem duplicação. A correção de proporção do GestureDetector
+pertence às distâncias dos gestos; o mapeamento usa X/Y normalizados originais,
+porque a região ativa está nesse mesmo espaço. Um detector com a proporção real
+do frame pode ser injetado sem consultar hardware.
+
+| Campo de CursorConfig | Padrão/contrato |
+|---|---|
+| screen_width / screen_height | Obrigatórios; inteiros positivos, sem bool |
+| active_region | Region2D(0.1, 0.1, 0.9, 0.9); retângulo não vazio dentro de 0..1 |
+| mirror_x | True; deve ser booleano |
+| smoothing_alpha | 0.25; finito, 0 < alpha ≤1, sem bool |
+
+A região padrão reserva 10% em cada lado; é um ponto inicial configurável,
+sem calibração ergonômica. Seus limites mapeiam para `0..largura-1` e
+`0..altura-1`. Predições externas à área sofrem clipping. O centro de
+1920×1080 permanece `(959.5, 539.5)`, com subpixels, sem arredondamento.
+
+Convenção de entrada: landmarks de uma imagem de câmera **não espelhada**.
+Para uma pessoa de frente para a câmera, deslocar a mão à sua direita reduz X
+nessa imagem. Com mirror_x=True, X bruto 0.7→0.3 vira X virtual 250→750 numa
+tela de largura 1001 e região padrão. Se a captura já espelhou o frame antes do
+tracking, usar mirror_x=False. A reflexão ocorre relativamente à área ativa,
+inclusive se ela for assimétrica; não refletir novamente o frame inteiro.
+
+A EMA atualiza somente durante POINT: primeiro ponto passa intacto, seguintes
+usam alpha por chamada. O default 0.25 favorece suavização; alpha 1 acompanha
+diretamente a entrada. O clamp após a EMA mantém a saída nos limites da tela
+lógica, inclusive sob arredondamentos. Não há compensação por FPS.
+
+### PINCH, inatividade e reset
+
+PINCH tem a prioridade definida pelo detector. Somente a transição de um gesto
+diferente de PINCH para PINCH emite CLICK; PINCH mantido emite NONE. Não há MOVE
+durante pinça. CLICK usa a última posição virtual, já suavizada; sem MOVE anterior,
+usa o indicador mapeado sem inicializar a EMA. Isso define um alvo lógico, sem
+reposicionar ou consultar o cursor real. A próxima camada deverá decidir como
+executar esse contrato de maneira segura.
+
+PINCH preserva posição/EMA, permitindo retomar POINT com suavização. None,
+UNKNOWN, OPEN_HAND e FIST emitem NONE sem coordenadas e limpam o histórico de
+movimento. NONE preserva o gesto observado (UNKNOWN na ausência). O reset
+explícito limpa também a detecção de transição; ele não apaga comandos observados.
+Geometria inválida limpa estado e propaga ValueError sem emitir um falso NONE.
+Falhas de sink propagam sem retries; o estado lógico já calculado não é revertido.
+
+### Segurança, observação e limites
+
+O sink implementado apenas adiciona dataclasses a uma lista privada. Nenhum
+mouse real é movido, clique real ocorre ou teclado é controlado. Nenhum módulo
+desta camada importa PyAutoGUI, OpenCV, MediaPipe, NumPy ou APIs do SO.
+Configuração e dados finitos são validados; nenhum download, segredo, execução
+dinâmica ou captura foi acrescentado. O Protocol permite futura extensão, mas
+a implementação e os testes atuais usam somente saída em memória.
+
+Demo finita, com mãos sintéticas e nenhuma biblioteca de hardware:
+
+```bash
+python scripts/demo_cursor.py
+```
+
+Requer HGI instalado, como no README. Imprime MOVE, MOVE, CLICK, NONE, NONE,
+incluindo a supressão de uma pinça mantida. stdout pertence apenas ao script;
+o controller e o sink não fazem I/O.
+
+Limites conhecidos: alternância ruidosa PINCH/outro gesto pode gerar novas
+intenções; perda/reaquisição e reset rearmam a transição. Não há histerese,
+confirmação, cooldown ou identidade persistente. Essas proteções são necessárias
+antes do controle real da Fase 6. Troca de mão sem perda explícita exige reset
+pelo chamador. Controller/sink são sequenciais, sem garantia entre threads.
+O histórico do sink cresce sem limite, adequado a testes/demos finitas;
+um futuro loop contínuo precisará de saída limitada ou sem retenção integral.
+Ergonomia, precisão das heurísticas e espelhamento da captura real continuam
+dependendo de validação manual posterior. A Fase 6 não foi iniciada.

@@ -1,5 +1,7 @@
 """Contracts for cursor intentions and the in-memory dry-run output."""
 
+import ast
+import inspect
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -62,3 +64,29 @@ def test_dry_run_instances_do_not_share_history() -> None:
     first, second = DryRunCursorSink(), DryRunCursorSink()
     first.emit(CursorCommand(CursorAction.NONE))
     assert second.commands == ()
+
+
+def test_cursor_layer_only_imports_standard_library_and_pure_hgi_modules() -> None:
+    """Keep device/OS backends outside the command and controller boundary."""
+    import hgi.cursor
+    import hgi.cursor_controller
+
+    allowed = {
+        "dataclasses",
+        "enum",
+        "typing",
+        "hgi.cursor",
+        "hgi.geometry",
+        "hgi.gesture_detector",
+        "hgi.hand_landmarks",
+        "hgi.smoothing",
+    }
+    for module in (hgi.cursor, hgi.cursor_controller):
+        tree = ast.parse(inspect.getsource(module))
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imports.add(node.module)
+        assert imports <= allowed

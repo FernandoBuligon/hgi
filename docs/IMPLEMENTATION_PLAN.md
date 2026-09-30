@@ -7,9 +7,9 @@ de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente as **Fases 1 a 3**, registradas nas seções 9 a 11, e agora somente
-a **Fase 4 — dedos e gestos determinísticos**, com evidências na seção 12.
-As fases 5–10 continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
+posteriormente as **Fases 1 a 4**, registradas nas seções 9 a 12, e agora somente
+a **Fase 5 — cursor virtual em dry-run**, com evidências na seção 13.
+As fases 6–10 continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
 explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
 automação, gravação de frames ou publicação.
 
@@ -52,8 +52,9 @@ flowchart LR
     B --> C[HandTracker: MediaPipe]
     C --> D[Landmarks e handedness]
     D --> E[GestureDetector]
-    E --> F[ActionController: mapeamento e smoothing]
-    F --> G[Dry-run ou mouse opt-in]
+    E --> F[CursorController: mapeamento e smoothing]
+    F --> J[CursorCommand]
+    J --> G[DryRunCursorSink ou futuro backend opt-in]
     B --> H[Overlay]
     D --> H
     E --> H
@@ -72,7 +73,9 @@ flowchart LR
 | `finger_state.py` | Configuração imutável, dedos nomeados e medidas geométricas da mão |
 | `gesture_detector.py` | POINT/PINCH/OPEN_HAND/FIST/UNKNOWN por chamada; temporalidade adiada |
 | `smoothing.py` | Média exponencial e reset, sem dependência de hardware |
-| `action_controller.py` | Alvo virtual, backend de mouse injetável e cooldown |
+| `cursor.py` | Intenções tipadas MOVE/CLICK/NONE, Protocol de saída e sink dry-run em memória |
+| `cursor_controller.py` | Configuração imutável, alvo virtual, mapeamento, EMA e transição lógica de pinça |
+| `action_controller.py` | Futuro backend real, proteção temporal e cooldown; sem implementação nesta fase |
 | `overlay.py` | Landmarks, mão, gesto, modo, alvo virtual e feedback de pinça |
 
 Os módulos implementados na Fase 2 e seus contratos estão em
@@ -113,8 +116,8 @@ Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfi
   virtuais explícitas, sem depender do PyAutoGUI.
 - Aplicar `previous + alpha * (current - previous)`, com `0 < alpha <= 1`;
   primeiro ponto inicializa o filtro. Resetar na perda de tracking/inatividade.
-- MOVE exige indicador estendido, demais dedos longos recolhidos e ausência de
-  pinça. Pinça tem prioridade. Usar thresholds `close < open`, confirmação de
+- MOVE exige POINT: somente indicador estendido e ausência de pinça. Pinça
+  tem prioridade. Na futura camada temporal, usar thresholds `close < open`, confirmação de
   frames e relógio monotônico; emitir clique somente em OPEN → PINCHED confirmado.
 - Pinça mantida não repete clique; gesto descartado por cooldown não é enfileirado.
   Após perda/troca de mão, bloquear cliques até abertura confirmada e iniciar
@@ -137,7 +140,7 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 | 2 — geometria e smoothing | `geometry.py`, `smoothing.py`; pontos/regiões e parâmetros passados explicitamente, sem arquivo de configuração global | RED/GREEN: zero, 3-4-5, referência inválida, valores não finitos, dimensões fornecidas, limites, clipping, regiões inválidas, espelhamento, alpha inválido/limite 1, sequência previsível, reset e regressões de arredondamento | Concluída sem hardware: 142 testes novos, 144 no total e 100% de linhas/branches nos novos módulos; evidências na seção 10 |
 | 3 — adaptador HandTracker | `hand_tracker.py`, `hand_landmarks.py`; modelo local documentado, sem loop de captura/overlay | TDD: conversão, handedness, nenhuma mão, 21 pontos, frame RGB, configuração, erros e limpeza; smoke com modelo real e arrays sintéticos | Concluída no escopo atualizado pelo usuário, conforme seção 11. Sem webcam/GUI obrigatórias; tracking humano e diagnóstico visual manual permanecem pendentes |
 | 4 — dedos e gestos | `finger_state.py`, `gesture_detector.py`; somente interpretação por mão | Fixtures sintéticas: estados nomeados, Left/Right, rotações, proporção, pinça/escalas/limite inclusivo, degenerações, prioridade e ausência; sem temporalidade | Concluída no escopo atualizado pelo usuário, seção 12. Nenhum hardware; calibração e validação visual permanecem pendentes |
-| 5 — cursor virtual | `action_controller.py` em dry-run, mapa/smoothing e alvo no overlay | `test_action_controller.py`: bordas, centro, clipping, margem, suavização, reset e ausência total de chamadas reais; simular tamanho de tela | Webcam/GUI para ergonomia. Alvo virtual suave e limitado; dry-run funciona sem carregar automação |
+| 5 — cursor virtual | `cursor.py`, `cursor_controller.py`, comandos em memória e demo sintética; sem overlay ou captura | `test_cursor.py`, `test_cursor_controller.py`: dados/sink, centro, clipping, região, espelhamento, resoluções, EMA, reset, inatividade e clique lógico por transição | Concluída no escopo atualizado pelo usuário, seção 13. Sem hardware; alvo limitado e suave, saída inspecionável; ergonomia visual pendente |
 | 6 — mouse opt-in | Backend PyAutoGUI, `--control`, clique e cooldown | Backend falso/spy e relógio injetado: clique único mantido por muitos frames, reabertura/novo clique, cooldown antes/no limite/depois, evento descartado, perda/reaquisição, backend indisponível, fail-safe e nenhuma reativação automática | Webcam, display e permissões. Manual: MOVE, pinça única, novo clique após abertura, parada pelo fail-safe e q/Esc; fallback seguro verificável |
 | 7 — overlay e ergonomia | Completar `overlay.py`, informações do modo/gesto/mão | Testar dados apresentados e modo efetivo após fallback com mocks; manual para legibilidade, feedback de pinça e instruções | Webcam/GUI. Uma pessoa entende o modo e a ação; sem excesso de métricas. FPS permanece opcional posterior |
 | 8 — gate de extras | Volume/mídia e demais extras adiados | Nenhum teste ou código de extras durante o MVP; futura fase precisará de plano próprio e testes de backend degradável | Aceite do MVP é pré-requisito; indisponibilidade de mídia não poderá afetar mouse/detecção |
@@ -226,8 +229,8 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após a Fase 4 autorizada,
-a próxima fase proposta é **Fase 5 — cursor virtual em dry-run**, que aguardará
+O aceite da Fase 0 foi restrito ao documento. Após a Fase 5 autorizada,
+a próxima fase proposta é **Fase 6 — controle opt-in e proteção temporal**, que aguardará
 instrução do usuário. A validação visual do tracker ainda exige câmera e escopo
 de integração de captura apropriado. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
@@ -545,7 +548,8 @@ e landmarks deverá ser realizada quando houver webcam, sem inferir PASS dos moc
 O pedido desta fase adiou explicitamente a temporalidade da proposta original:
 não foram implementados histerese, confirmação, debounce, cooldown ou eventos.
 Nenhum frame, webcam, display, biblioteca de visão ou automação foi usado pelo
-reconhecimento. A Fase 5 não foi iniciada e aguarda autorização.
+reconhecimento. Ao encerrar a Fase 4, a Fase 5 não estava iniciada; sua execução
+posterior está registrada na seção 13.
 
 AGENTS.md, plano, arquitetura, hand_landmarks.py e geometry.py foram lidos
 integralmente antes das alterações. Git estava limpo na branch `mais`, base
@@ -652,3 +656,134 @@ hardware foi executado ou exigido para aceitar a lógica determinística desta f
 Próxima fase recomendada: **Fase 5 — cursor virtual em dry-run**, somente após
 autorização. Calibração, diagnóstico visual e proteção temporal permanecem itens
 futuros; nenhum controle real do computador foi habilitado.
+
+## 13. Evidências da Fase 5 — cursor virtual em dry-run
+
+**Estado: concluída somente a camada lógica autorizada. A Fase 6 não foi iniciada.**
+O pedido desta fase substitui o overlay/webcam da proposta inicial por comandos
+inspecionáveis e demo sintética. Não houve controle real, consulta ao monitor,
+captura, loop de frames, relógio, cooldown ou dependência nova. Inspeção iniciada
+em 29/09/2026; fechamento em 30/09/2026, conforme data da sessão.
+
+AGENTS.md, plano, arquitetura e os cinco módulos matemáticos/de reconhecimento
+solicitados foram lidos integralmente antes de alterar código. Git estava limpo
+na branch `mais`, base `d8ea794`. ECC: planejamento, tdd-workflow, python-reviewer,
+security-review e verification-loop. Nenhuma API externa exigiu pesquisa nova.
+
+### Arquivos, contratos e decisões
+
+Criados: `src/hgi/cursor.py`, `src/hgi/cursor_controller.py`,
+`tests/test_cursor.py`, `tests/test_cursor_controller.py`, `scripts/demo_cursor.py`.
+Modificados: README, ARCHITECTURE.md e este plano. AGENTS.md, módulos anteriores,
+entrypoint e dependências preservados. O nome CursorController separa o alvo
+lógico do futuro ActionController/backend de efeitos reais da Fase 6.
+
+- CursorCommand imutável: action MOVE/CLICK/NONE; X/Y em pixels lógicos finitos
+  e não negativos para MOVE/CLICK, ausentes para NONE; Gesture opcional tipado.
+- CursorSink é um Protocol de emit(command). A única implementação é
+  DryRunCursorSink, com lista privada por instância e snapshot tuple para inspeção.
+  Todos os comandos, inclusive NONE, são registrados em ordem, sem I/O.
+- CursorConfig imutável exige resolução explícita e região normalizada válida.
+  Defaults únicos: Region2D(0.1, 0.1, 0.9, 0.9), mirror_x=True e alpha=0.25.
+  Margem/alpha são valores iniciais configuráveis, sem calibração de hardware.
+- CursorController(config, *, sink=None, detector=None) cria EMA própria e aceita
+  detector/sink injetados. update(hand | None) retorna e emite a mesma intenção;
+  config/sink são inspecionáveis. Não consulta resolução ou posição real.
+- POINT usa INDEX_FINGER_TIP → map_camera_to_screen → ExponentialSmoother →
+  clamp final → MOVE. Reutiliza somente matemática existente; mantém subpixels
+  em 0..dimensão−1. Correção de proporção pertence ao detector injetado, não ao
+  espaço normalizado original do mapeamento.
+- Entrada padrão não espelhada: a mão de frente à câmera movendo-se à direita
+  reduz X bruto. A reflexão relativa à área ativa faz o cursor virtual ir à
+  direita. Entrada já espelhada exige mirror_x=False para não inverter duas vezes.
+- PINCH gera CLICK somente na transição não-PINCH→PINCH, na última posição
+  virtual suavizada; sem posição anterior, mapeia o indicador sem inicializar
+  EMA. PINCH mantido gera NONE e preserva EMA/posição, sem MOVE.
+- Ausência, UNKNOWN, OPEN_HAND e FIST geram NONE e descartam movimento antigo.
+  reset limpa EMA/posição/gesto anterior sem apagar o histórico observado.
+  Geometria inválida limpa estado e propaga ValueError, sem emitir resultado
+  falso. Erros de sink propagam; estado calculado não é revertido nem reenviado.
+
+### TDD e especificação das garantias
+
+Os dois grupos receberam testes escritos e executados antes da implementação.
+RED significa erro de coleta por módulo ausente, não testes de runtime executados
+e falhando. Não foram usados mocks de nenhuma regra interna, apenas a factory
+existente de mãos e transformações sintéticas que preservam a pose.
+
+| Grupo | Comando do ciclo | RED observado | GREEN observado | Checkpoints locais |
+|---|---|---|---|---|
+| Dados imutáveis, validação e sink | `python -m pytest -q tests/test_cursor.py` | 1 erro de coleta: hgi.cursor ausente | 11 passaram | `74520c1` → `4de9ed0` |
+| Pipeline, configuração, estados e clique lógico | `python -m pytest -q tests/test_cursor_controller.py` | 1 erro de coleta: hgi.cursor_controller ausente | 31 passaram | `b550722` → `c6ed987` |
+| Fronteira segura e demo | Ambos os arquivos de teste; `python scripts/demo_cursor.py` | Ampliação de garantia existente, sem nova falha de funcionalidade | 43 testes do cursor passaram; demo MOVE/MOVE/CLICK/NONE/NONE | Checkpoint de fechamento |
+
+Durante o segundo GREEN, 9 testes inicialmente falharam por igualdade exata
+de floats, com 22 passando. Valores como 999.9999999999999 são subpixels válidos;
+as comparações numéricas foram corrigidas para pytest.approx, sem arredondar
+produção ou mudar regras para satisfazer os testes. Nenhum teste foi desativado.
+Não houve refactor que exigisse um checkpoint adicional. Sem squash ou push.
+
+| Garantia | Teste/arquivo | Tipo | Evidência |
+|---|---|---|---|
+| Command imutável, enums e rejeição de ausência/NaN/infinito/negativos/bool | test_cursor.py | Unitário de contratos | PASS |
+| Ordem, snapshots e históricos independentes | Testes de DryRunCursorSink | Unitário em memória | PASS |
+| Centro em 1920×1080, 801×601 e 1×1 | test_point_center_uses_supplied_screen_dimensions | Integração sintética | PASS |
+| Região ativa menor, seus limites e clipping externo | test_active_region_reaches_edges_and_clips_predictions | Integração de geometria | PASS |
+| Direção física conceitual e entrada já espelhada | Dois testes de mirror | Integração de mapeamento | PASS |
+| Sequência EMA em X/Y, inicialização e instâncias independentes | Testes de smoothing do controller | Integração real da EMA | PASS |
+| None/UNKNOWN/FIST/OPEN_HAND não movem e limpam movimento | test_inactivity_emits_none_and_discards_old_motion | Integração de gestos | PASS |
+| CLICK na entrada, último alvo, PINCH mantido e reabertura | Testes de pinça e ordem de saída | Estado lógico | PASS |
+| PINCH inicial, preservação de EMA e reaquisição documentada | Testes específicos de pinça | Estado lógico | PASS |
+| Reset limpa posição/EMA/transição sem apagar saída | Teste de reset | Estado observável | PASS |
+| Geometria inválida propaga e limpa estado; thresholds injetáveis | Testes de erro/injeção | Contrato de fronteira interna | PASS |
+| Configuração imutável, valores inválidos e default seguro | Testes de CursorConfig | Contrato de configuração | PASS |
+| Imports da camada não incluem bibliotecas de dispositivo/SO | Teste de fronteira por AST | Garantia estrutural | PASS |
+
+Total novo: **43 testes**, 12 de comandos/sink/fronteira e 31 de controller.
+
+### Verification-loop, revisão Python e segurança
+
+| Comando/verificação executado | Resultado |
+|---|---|
+| `python -m pytest -q` | 262 passaram; 43 novos; sem skips |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 99% total; 394 instruções, 1 não coberta; 104 branches cobertos |
+| Cobertura de cursor.py / cursor_controller.py | 100% cada; 39/65 instruções e 12/12 branches, respectivamente |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS; 27 arquivos Python formatados |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | Nenhum requisito quebrado; cache pip indisponível no sandbox, sem falha |
+| Wheel offline com --no-deps --no-build-isolation --no-index em /tmp/hgi-phase5-wheels | PASS; nenhum download/dependência instalada |
+| `python scripts/demo_cursor.py` | MOVE 959.5/539.5, MOVE 1019.5/573.2, CLICK no mesmo alvo, NONE, NONE |
+| Demo via python -I -S -B, sem site-packages | PASS com imports cv2/mediapipe/numpy/pyautogui bloqueados e audit hook para rede/processos/ctypes |
+| python-reviewer, AST e revisão manual de tipos | Interfaces tipadas, imutabilidade, defaults, estado/erros e funções ≤28 linhas; sem CRITICAL/HIGH pendente |
+| security-review, scan limitado e imports transitivos | Somente stdlib/puro HGI; sem segredos, execução dinâmica, automação, consulta ao SO ou captura na camada |
+| Diff/whitespace e documentos | Alterações limitadas à Fase 5; AGENTS.md preservado |
+
+Tipos foram revisados manualmente: Mypy/Pyright/Bandit não estão instalados;
+não se alega checagem estática dedicada nem auditoria completa de dependências.
+A única linha não coberta continua o getter detector.config da Fase 4. A demo
+manual está em scripts, fora da cobertura do pacote, sem exclusões artificiais.
+
+Confirmação de segurança: nenhum mouse real foi movido, nenhum clique real
+ocorreu, nenhum teclado foi controlado e nenhuma API do SO foi chamada pela
+camada implementada. Nenhum módulo dessa camada exige PyAutoGUI. Controller/sink
+operam em memória; somente o script imprime as intenções. Nenhuma câmera ou
+biblioteca de visão foi carregada pela demo. Ferramentas de teste/build e Git
+usam o ambiente de desenvolvimento normalmente, sem automação de entrada.
+
+### Riscos e próxima fase
+
+A transição básica não é debounce: oscilação de reconhecimento pode reemitir
+CLICK. Reset/perda de mão rearma PINCH, inclusive se a pinça reaparecer fechada.
+Não há cooldown, histerese, confirmação ou associação persistente de mão.
+O futuro backend deverá tratar alvo de CLICK, falhas de saída, fail-safe e
+reaquisição antes de qualquer controle real. A arquitetura atual é sequencial.
+O sink mantém histórico ilimitado; um loop contínuo precisará limitar retenção.
+Alpha é por chamada; margens e heurísticas ainda não têm calibração com mãos
+reais. Testes sintéticos não validam ergonomia ou orientação da captura real.
+
+A duplicidade OpenCV anteriormente registrada permanece, sem alteração de
+dependências; não participa desta fase puramente Python. Nenhum teste de hardware
+foi necessário ou realizado. Próxima fase recomendada: **Fase 6 — controle
+opt-in e proteção temporal**, somente após nova autorização, preservando dry-run
+e adicionando os gates ausentes antes de habilitar qualquer efeito real.
