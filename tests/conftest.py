@@ -1,12 +1,29 @@
 """Readable synthetic hands; all geometry remains real HGI code."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from math import cos, radians, sin
 from typing import Literal
 
 import pytest
 
 from hgi.hand_landmarks import DetectedHand, HandLandmark, NormalizedLandmark
+
+
+@dataclass
+class FakeClock:
+    """Explicit seconds for temporal tests; no sleeping or real clock access."""
+
+    now: float = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def fake_clock() -> FakeClock:
+    """Return a separate controllable clock for each test."""
+    return FakeClock()
 
 
 @pytest.fixture
