@@ -6,10 +6,10 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from time import monotonic
-from typing import Protocol, TypeVar
+from time import monotonic, perf_counter
+from typing import Protocol, TypeVar, cast
 
 import cv2
 import numpy as np
@@ -17,16 +17,18 @@ from numpy.typing import NDArray
 
 from hgi.camera import Camera, validate_bgr_frame
 from hgi.click_feedback import ClickFeedback
-from hgi.cursor import DryRunCursorSink
+from hgi.cursor import ControlState, CursorAction, CursorCommand, DryRunCursorSink
 from hgi.cursor_controller import CursorConfig, CursorController
 from hgi.finger_state import GestureConfig
 from hgi.geometry import Point2D, normalized_to_pixels
-from hgi.gesture_detector import GestureDetector
+from hgi.gesture_detector import Gesture, GestureDetector
 from hgi.hand_landmarks import DetectedHand
-from hgi.hand_tracker import HandTracker
+from hgi.hand_tracker import HandTracker, LiveResult
 from hgi.overlay import OverlayState, draw_overlay
+from hgi.performance import PipelineMetrics, RateMeter
 from hgi.real_cursor import RealCursorSink
-from hgi.temporal import TemporalGestureFilter
+from hgi.temporal import TemporalConfig, TemporalGestureFilter
+from hgi.tracker_config import HandTrackerConfig, RunningMode
 
 
 class DisplayError(RuntimeError):
@@ -41,6 +43,18 @@ class FrameTracker(Protocol):
         ...
 
 
+class LiveFrameTracker(Protocol):
+    """Bounded asynchronous tracker; only the owner thread consumes results."""
+
+    def submit(self, frame: NDArray[np.uint8]) -> bool:
+        """Return False if the single inference slot is busy."""
+        ...
+
+    def poll(self) -> LiveResult | None:
+        """Consume one new internal sample, or return None while pending."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class DemoConfig:
     """Camera settings and opt-in output; None dimensions select mode defaults."""
@@ -52,6 +66,7 @@ class DemoConfig:
     screen_width: int | None = None
     screen_height: int | None = None
     real_control: bool = False
+    tracker: HandTrackerConfig = HandTrackerConfig()
 
     def __post_init__(self) -> None:
         normalized_to_pixels(Point2D(0, 0), self.frame_width, self.frame_height)
@@ -61,6 +76,8 @@ class DemoConfig:
             normalized_to_pixels(Point2D(0, 0), self.screen_width, self.screen_height)
         if not isinstance(self.real_control, bool):
             raise ValueError("real_control must be an explicit boolean")
+        if not isinstance(self.tracker, HandTrackerConfig):
+            raise ValueError("tracker must be a HandTrackerConfig")
         if (
             isinstance(self.camera_index, bool)
             or not isinstance(self.camera_index, int)
@@ -115,18 +132,33 @@ class WebcamPipeline:
 
     def __init__(
         self,
-        tracker: FrameTracker,
+        tracker: FrameTracker | LiveFrameTracker,
         config: CursorConfig,
         *,
         sink: DryRunCursorSink | RealCursorSink | None = None,
         clock: Callable[[], float] = monotonic,
         ui_clock: Callable[[], float] = monotonic,
+        tracker_config: HandTrackerConfig | None = None,
+        performance_clock: Callable[[], float] = perf_counter,
     ) -> None:
         if config.mirror_x:
             raise ValueError("Mirrored demo input requires CursorConfig mirror_x=False")
         self._tracker = tracker
         self._config = config
         self._clock = clock
+        self._tracker_config = (
+            tracker_config if tracker_config is not None else HandTrackerConfig()
+        )
+        self._performance_clock = performance_clock
+        self._inference_rate = RateMeter()
+        self._inference_rate.rate(performance_clock())
+        self._inference_ms = 0.0
+        self._overlay_ms = 0.0
+        self._last_hand: DetectedHand | None = None
+        self._last_result_at: float | None = None
+        self._recovering = False
+        self._accept_after = float("-inf")
+        self._temporal_config = TemporalConfig()
         self._click_feedback = ClickFeedback(clock=ui_clock)
         self._shape: tuple[int, int] | None = None
         self._sink = sink if sink is not None else DryRunCursorSink(max_history=1)
@@ -134,7 +166,9 @@ class WebcamPipeline:
 
     def _configure(self, aspect: float) -> None:
         self._detector = GestureDetector(GestureConfig(image_aspect_ratio=aspect))
-        self._temporal = TemporalGestureFilter(clock=self._clock)
+        self._temporal = TemporalGestureFilter(
+            config=self._temporal_config, clock=self._clock
+        )
         self._controller = CursorController(
             self._config,
             sink=self._sink,
@@ -148,7 +182,11 @@ class WebcamPipeline:
         return self._controller
 
     def process(
-        self, frame: NDArray[np.uint8], *, fps: float = 0.0
+        self,
+        frame: NDArray[np.uint8],
+        *,
+        fps: float = 0.0,
+        capture_seconds: float = 0.0,
     ) -> tuple[NDArray[np.uint8], OverlayState]:
         """Use actual frame shape; return annotated BGR and public snapshots.
 
@@ -159,16 +197,45 @@ class WebcamPipeline:
             validate_bgr_frame(frame)
             shape = frame.shape[:2]
             if shape != self._shape:
+                if self._shape is not None:
+                    self._accept_after = self._performance_clock()
                 self._controller.disable()
                 self._configure(shape[1] / shape[0])
                 self._shape = shape
+                self._last_hand = None
+                self._last_result_at = None
+                self._recovering = False
             bgr = cv2.flip(frame, 1)
+            before = self._performance_clock()
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            hand = select_hand(self._tracker.process(rgb))
-            command = self._controller.update(hand)
+            converted = self._performance_clock()
+            hand, fresh = self._infer(rgb)
+            inferred = self._performance_clock()
+            command = (
+                self._controller.update(hand)
+                if fresh
+                else CursorCommand(CursorAction.NONE)
+            )
+            if (
+                self._recovering
+                and self._temporal.status.stable is Gesture.UNKNOWN
+                and not self._temporal.status.armed
+            ):
+                self._recovering = False
             observation = self._controller.observation
             if observation is None:
                 observation = self._detector.observe(hand)
+            controlled = self._performance_clock()
+            metrics = PipelineMetrics(
+                self._tracker_config.running_mode.name,
+                self._tracker_config.delegate.name,
+                self._inference_rate.rate(controlled),
+                self._inference_ms,
+                capture_seconds * 1000,
+                (converted - before) * 1000,
+                (controlled - inferred) * 1000,
+                self._overlay_ms,
+            )
             state = OverlayState(
                 hand,
                 observation,
@@ -179,16 +246,87 @@ class WebcamPipeline:
                 fps,
                 self._click_feedback.update(command.action),
                 self._sink.mode,
+                metrics,
             )
-            return draw_overlay(bgr, state, self._config), state
+            rendered = draw_overlay(bgr, state, self._config)
+            self._overlay_ms = (self._performance_clock() - controlled) * 1000
+            return rendered, replace(
+                state, metrics=replace(metrics, overlay_ms=self._overlay_ms)
+            )
         except BaseException:
             # Cleanup only; do not turn broken inference into a missing hand.
             self._controller.disable()
             raise
 
+    def _infer(self, rgb: NDArray[np.uint8]) -> tuple[DetectedHand | None, bool]:
+        """Return whether control may sample; pending results never advance EMA."""
+        before = self._performance_clock()
+        if self._tracker_config.running_mode is not RunningMode.LIVE_STREAM:
+            hands = cast(FrameTracker, self._tracker).process(rgb)
+            completed = self._performance_clock()
+            self._inference_rate.tick(completed)
+            self._inference_ms = (completed - before) * 1000
+            return select_hand(hands), True
+        tracker = cast(LiveFrameTracker, self._tracker)
+        result = tracker.poll()
+        tracker.submit(rgb)
+        now = self._performance_clock()
+        max_age = self._temporal_config.tracking_grace_seconds
+        completion = result.completed_at if result is not None else now
+        stalled = (
+            self._last_result_at is not None
+            and completion - self._last_result_at > max_age
+        )
+        if self._recovering or stalled:
+            # Complete the existing filter's loss-of-tracking path before reuse.
+            self._recovering = True
+            self._last_hand = None
+            self._last_result_at = None
+            return None, True
+        if result is not None:
+            if (
+                result.shape != rgb.shape[:2]
+                or result.submitted_at < self._accept_after
+                or now - result.submitted_at > max_age
+            ):
+                self._last_hand = None
+                self._last_result_at = None
+                self._recovering = True
+                return None, True
+            self._last_hand = select_hand(result.hands)
+            self._last_result_at = result.completed_at
+            self._inference_ms = result.latency_seconds * 1000
+            self._inference_rate.tick(now)
+            return self._last_hand, True
+        if self._last_result_at is None or now - self._last_result_at > max_age:
+            self._last_hand = None
+            return None, True
+        return self._last_hand, False
+
     def handle_key(self, key: int) -> bool:
         """Handle demo keys; R also resets UI count/feedback, D/E preserve them."""
+        already_enabled = self._controller.state is ControlState.ENABLED
         quit_requested = handle_key(key, self._controller)
+        if (
+            self._tracker_config.running_mode is RunningMode.LIVE_STREAM
+            and (key & 0xFF not in (ord("e"), ord("E")) or not already_enabled)
+            and key & 0xFF
+            in (
+                ord("e"),
+                ord("E"),
+                ord("d"),
+                ord("D"),
+                ord("r"),
+                ord("R"),
+                ord("q"),
+                ord("Q"),
+                27,
+            )
+        ):
+            self._accept_after = self._performance_clock()
+            self._last_hand = None
+            self._last_result_at = None
+            self._recovering = False
         if key & 0xFF in (ord("r"), ord("R")):
             self._click_feedback.reset()
         return quit_requested
@@ -250,7 +388,10 @@ def _run_loop(pipeline: WebcamPipeline, camera: Camera, window_name: str) -> Non
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     previous, fps = monotonic(), 0.0
     while True:
-        frame, _ = pipeline.process(camera.read(), fps=fps)
+        read_start = perf_counter()
+        bgr = camera.read()
+        read_seconds = perf_counter() - read_start
+        frame, _ = pipeline.process(bgr, fps=fps, capture_seconds=read_seconds)
         now = monotonic()
         elapsed = now - previous
         fps = 1.0 / elapsed if elapsed > 0 else 0.0
@@ -288,12 +429,15 @@ def run_webcam(config: DemoConfig) -> None:
                     height=config.frame_height,
                 )
             ) as camera,
-            _preserve_cleanup_error(HandTracker(model)) as tracker,
+            _preserve_cleanup_error(
+                HandTracker(model, config=config.tracker)
+            ) as tracker,
         ):
             pipeline = WebcamPipeline(
                 tracker,
                 cursor_config,
                 sink=sink,
+                tracker_config=config.tracker,
             )
             _run_loop(pipeline, camera, window_name)
     finally:

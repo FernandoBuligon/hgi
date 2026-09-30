@@ -89,3 +89,18 @@ def test_invalid_configuration_does_not_open_capture(capture, options):
     with pytest.raises(ValueError):
         Camera(**options)
     cv2.VideoCapture.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "reported,expected", [(25.0, 25.0), (0.0, None), (float("nan"), None)]
+)
+def test_reported_fps_is_metadata_not_effective_throughput(
+    monkeypatch, reported, expected
+):
+    capture = Mock()
+    capture.isOpened.return_value = True
+    capture.get.return_value = reported
+    monkeypatch.setattr(cv2, "VideoCapture", Mock(return_value=capture))
+    with Camera(1) as camera:
+        assert camera.reported_fps == expected
+    capture.get.assert_called_once_with(cv2.CAP_PROP_FPS)

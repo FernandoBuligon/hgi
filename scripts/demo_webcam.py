@@ -4,6 +4,13 @@ import argparse
 import sys
 from pathlib import Path
 
+from hgi.tracker_config import (
+    HandTrackerConfig,
+    InferenceDelegate,
+    RunningMode,
+    add_inference_arguments,
+)
+
 
 def _parser() -> argparse.ArgumentParser:
     """Describe explicit output opt-in without importing hardware libraries."""
@@ -40,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="select real mouse output; session still starts DISABLED (E enables)",
     )
+    add_inference_arguments(parser)
     return parser
 
 
@@ -73,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.screen_width,
                 args.screen_height,
                 args.real_control,
+                HandTrackerConfig(
+                    running_mode=RunningMode(args.running_mode),
+                    delegate=InferenceDelegate(args.delegate),
+                ),
             )
         )
     except (

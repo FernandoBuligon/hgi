@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from types import TracebackType
 
 import cv2
@@ -54,6 +55,17 @@ class Camera:
             raise CameraError(
                 f"Could not configure/open camera {index}: {error}"
             ) from error
+
+    @property
+    def reported_fps(self) -> float | None:
+        """Driver metadata only; effective capture rate must still be measured."""
+        if self._closed:
+            raise CameraError("Camera is closed")
+        try:
+            fps = float(self._capture.get(cv2.CAP_PROP_FPS))
+        except cv2.error as error:
+            raise CameraError("Could not query camera FPS") from error
+        return fps if isfinite(fps) and fps > 0 else None
 
     def read(self) -> NDArray[np.uint8]:
         """Read a validated BGR frame, preserving actual dimensions and channels."""

@@ -13,6 +13,7 @@ from hgi.cursor_controller import CursorConfig
 from hgi.geometry import Point2D, map_camera_to_screen, normalized_to_pixels
 from hgi.gesture_detector import Gesture, GestureObservation
 from hgi.hand_landmarks import DetectedHand, HandLandmark
+from hgi.performance import PipelineMetrics
 from hgi.temporal import TemporalStatus
 
 _FINGER_CHAINS = (
@@ -80,6 +81,7 @@ class OverlayState:
     fps: float = 0.0
     click_feedback: ClickFeedbackState = ClickFeedbackState()
     mode: CursorMode = CursorMode.DRY_RUN
+    metrics: PipelineMetrics | None = None
 
 
 def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
@@ -102,9 +104,15 @@ def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
         f"Pinch: {pinch} | Cursor: {cursor} | Action: {state.command.action.value}",
         f"Last CLICK: {'RECENT' if state.click_feedback.recent_click else '--'} | "
         f"Session CLICKs: {state.click_feedback.click_count}",
-        f"FPS: {state.fps:.1f} | "
+        f"Loop FPS: {state.fps:.1f} | "
         f"Logical screen: {config.screen_width}x{config.screen_height}",
     )
+    if state.metrics is not None:
+        metrics = state.metrics
+        lines += (
+            f"Inference: {metrics.mode}/{metrics.delegate} | "
+            f"FPS: {metrics.inference_fps:.1f} | {metrics.inference_ms:.1f} ms",
+        )
     if hand is None:
         return (*lines, "Index normalized: -- | screen target: --")
     tip = hand.landmarks[HandLandmark.INDEX_FINGER_TIP]
