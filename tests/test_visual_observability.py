@@ -10,7 +10,7 @@ from hgi.temporal import TemporalGestureFilter
 
 def test_bounded_sink_retains_latest_intentions_without_changing_default_history():
     sink = DryRunCursorSink(max_history=2)
-    commands = [CursorCommand(CursorAction.NONE) for _ in range(3)]
+    commands = [CursorCommand(CursorAction.MOVE, float(i), float(i)) for i in range(3)]
     for command in commands:
         sink.emit(command)
     assert sink.commands == tuple(commands[-2:])

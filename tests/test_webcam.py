@@ -126,7 +126,9 @@ def test_processing_error_disables_and_propagates(hand_factory):
     assert pipeline.controller.state is ControlState.DISABLED
 
 
-@pytest.mark.parametrize("failure", [None, "process", "imshow", "waitKey"])
+@pytest.mark.parametrize(
+    "failure", [None, "process", "namedWindow", "imshow", "waitKey"]
+)
 def test_demo_releases_camera_tracker_and_windows(tmp_path, monkeypatch, failure):
     import hgi.webcam as webcam
 
@@ -162,3 +164,78 @@ def test_missing_model_points_to_documentation_before_camera(tmp_path, monkeypat
     with pytest.raises(FileNotFoundError, match="docs/MODELS.md"):
         run_webcam(DemoConfig(model_path=tmp_path / "absent.task"))
     capture.assert_not_called()
+
+
+def test_no_display_is_reported_before_opening_camera(tmp_path, monkeypatch):
+    import hgi.webcam as webcam
+
+    model = tmp_path / "model.task"
+    model.touch()
+    monkeypatch.setattr(webcam.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    capture = Mock()
+    monkeypatch.setattr(cv2, "VideoCapture", capture)
+    with pytest.raises(webcam.DisplayError, match="graphical session"):
+        run_webcam(DemoConfig(model_path=model))
+    capture.assert_not_called()
+
+
+def test_tracker_initialization_error_releases_camera_and_windows(
+    tmp_path, monkeypatch
+):
+    import hgi.webcam as webcam
+    from hgi.hand_tracker import HandTrackerError
+
+    model = tmp_path / "model.task"
+    model.touch()
+    capture = Mock()
+    capture.isOpened.return_value = True
+    monkeypatch.setenv("DISPLAY", ":test")
+    monkeypatch.setattr(cv2, "VideoCapture", Mock(return_value=capture))
+    monkeypatch.setattr(cv2, "destroyAllWindows", Mock())
+    monkeypatch.setattr(
+        webcam, "HandTracker", Mock(side_effect=HandTrackerError("bad model"))
+    )
+    with pytest.raises(HandTrackerError, match="bad model"):
+        run_webcam(DemoConfig(model_path=model))
+    capture.release.assert_called_once()
+    cv2.destroyAllWindows.assert_called_once()
+
+
+def test_window_close_exits_and_releases_all_resources(tmp_path, monkeypatch):
+    import hgi.webcam as webcam
+
+    model = tmp_path / "model.task"
+    model.touch()
+    tracker = FakeTracker()
+    capture = Mock()
+    capture.isOpened.return_value = True
+    capture.read.return_value = (True, np.zeros((120, 160, 3), np.uint8))
+    monkeypatch.setenv("DISPLAY", ":test")
+    monkeypatch.setattr(webcam, "HandTracker", Mock(return_value=tracker))
+    monkeypatch.setattr(cv2, "VideoCapture", Mock(return_value=capture))
+    for name in ("namedWindow", "imshow", "destroyAllWindows"):
+        monkeypatch.setattr(cv2, name, Mock())
+    monkeypatch.setattr(cv2, "waitKey", Mock(return_value=-1))
+    monkeypatch.setattr(cv2, "getWindowProperty", Mock(return_value=0))
+    run_webcam(DemoConfig(model_path=model))
+    assert tracker.closed
+    capture.release.assert_called_once()
+    capture.read.assert_called_once()
+    cv2.destroyAllWindows.assert_called_once()
+
+
+def test_cli_help_absent_model_and_forbidden_control_flag(tmp_path, capsys):
+    import runpy
+
+    main = runpy.run_path("scripts/demo_webcam.py")["main"]
+    with pytest.raises(SystemExit) as help_exit:
+        main(["--help"])
+    assert help_exit.value.code == 0
+    assert "DRY-RUN" in capsys.readouterr().out
+    assert main(["--model", str(tmp_path / "absent.task")]) == 1
+    assert "docs/MODELS.md" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as control_exit:
+        main(["--control"])
+    assert control_exit.value.code == 2

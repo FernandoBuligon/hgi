@@ -29,7 +29,7 @@ class Camera:
     Use with Camera(...) to release even when the caller raises.
     """
 
-    def __init__(self, index: int = 0, *, width: int = 640, height: int = 480):
+    def __init__(self, index: int = 0, *, width: int = 640, height: int = 480) -> None:
         for name, value, minimum in (
             ("index", index, 0),
             ("width", width, 1),

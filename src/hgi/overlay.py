@@ -151,17 +151,27 @@ def _draw_hand(frame: NDArray[np.uint8], state: OverlayState) -> None:
 def _text(
     frame: NDArray[np.uint8], text: str, location: tuple[int, int], scale: float
 ) -> None:
-    for color, thickness in (((0, 0, 0), 3), (_WHITE, 1)):
-        cv2.putText(
-            frame,
-            text,
-            location,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            scale,
-            color,
-            thickness,
-            cv2.LINE_AA,
-        )
+    (width, height), baseline = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1
+    )
+    x, y = location
+    cv2.rectangle(
+        frame,
+        (x - 2, y - height - 2),
+        (x + width + 2, y + baseline + 2),
+        (20, 20, 20),
+        -1,
+    )
+    cv2.putText(
+        frame,
+        text,
+        location,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        _WHITE,
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def draw_overlay(
