@@ -24,3 +24,6 @@ venv/
 .DS_Store
 
 *.log
+
+# MediaPipe models are prepared explicitly, never committed.
+/models/*.task

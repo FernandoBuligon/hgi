@@ -7,9 +7,11 @@ de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente a **Fase 1 — bootstrap** e a **Fase 2 — matemática e smoothing**,
-registradas nas seções 9 e 10. As fases 3–10 continuam propostas, sem autorização.
-Não houve download de modelo, abertura de webcam, automação ou publicação.
+posteriormente as **Fases 1 e 2**, registradas nas seções 9 e 10, e agora somente
+a **Fase 3 — adaptador HandTracker**, com evidências na seção 11. As fases 4–10
+continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
+explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
+automação, gravação de frames ou publicação.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
@@ -64,7 +66,7 @@ flowchart LR
 | `__init__.py`, `__main__.py` | Importação sem efeitos colaterais; entrypoint `python -m hgi` |
 | `app.py` | CLI argparse, recursos, loop e encerramento; nenhuma regra geométrica |
 | `config.py` | Parâmetros centralizados e validados; dry-run como padrão |
-| `landmarks.py` | Representação simples dos 21 pontos, índices nomeados e handedness opcional |
+| `hand_landmarks.py` | Representação própria dos 21 pontos XYZ, índices oficiais e handedness/score opcionais |
 | `geometry.py` | Distâncias, normalização por escala, mapeamento e clipping |
 | `hand_tracker.py` | Adaptar frames e resultados MediaPipe; nunca executar ações |
 | `gesture_detector.py` | Dedos, MOVE/IDLE/PINCH, confirmação e histerese |
@@ -74,9 +76,9 @@ flowchart LR
 
 Os módulos implementados na Fase 2 e seus contratos estão em
 [ARCHITECTURE.md](ARCHITECTURE.md). `Point2D` e `Region2D` residem em `geometry.py`;
-`landmarks.py` permanece proposto para a adaptação do tracker na Fase 3, onde
-evitará índices mágicos e
-acoplamento das regras à API externa. O backend PyAutoGUI poderá permanecer
+`hand_landmarks.py` foi implementado na Fase 3, seguindo o nome solicitado pelo
+usuário, e evita índices mágicos e acoplamento das regras à API externa.
+O backend PyAutoGUI poderá permanecer
 pequeno no controlador, sem hierarquia de plugins. Imports de automação serão
 adiados até `--control`; testes e dry-run usarão um backend sem efeitos reais.
 Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfica.
@@ -86,14 +88,16 @@ Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfi
 - Preferir Python 3.11 e validar instalação limpa antes de fixar versões.
   `pyproject.toml` será a referência; `requirements.txt` deverá ser consistente.
   Desenvolvimento terá pytest, pytest-cov e Ruff, sem ferramentas redundantes.
-- Preferir Hand Landmarker da API Tasks, CPU, uma mão e modo VIDEO síncrono para
-  manter o fluxo simples. Validar a API na versão escolhida antes da Fase 3.
-  O modo VIDEO aceita frames de webcam com timestamps estritamente crescentes.
-  Exige modelo local compatível; obtê-lo durante preparação, nunca no loop.
-  Registrar origem, versão, licença e checksum real quando for adquirido.
+- Usar Hand Landmarker da API Tasks, CPU, uma mão por padrão e **IMAGE** síncrono
+  na Fase 3, para processar um frame sem timestamps ou estado temporal. A API foi
+  confirmada na versão instalada 1.0.1. A proposta anterior de VIDEO fica para
+  futura integração de vídeo; esse modo exige timestamps crescentes. Exigir modelo
+  local compatível, preparado explicitamente, nunca adquirido no runtime.
+  Origem, versão, licença indicada pela model card e checksum estão em MODELS.md.
 - Não copiar exemplos de `mp.solutions.hands` sem comprovar compatibilidade.
   Handedness descreve lateralidade, não identidade persistente de uma mão.
-- Converter BGR para RGB na fronteira do tracker. Preservar coordenadas
+- Converter BGR para RGB na futura captura, antes da chamada ao tracker, cuja
+  entrada nesta fase é estritamente RGB. Preservar coordenadas
   normalizadas e corrigir a proporção largura/altura no cálculo de distâncias
   2D, para não distorcer a pinça em frames retangulares.
 - Avaliar extensão dos dedos por ângulos e relações articulares; tratar o polegar
@@ -128,7 +132,7 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 | 0 — plano | Somente `docs/IMPLEMENTATION_PLAN.md` | Revisar requisitos, fontes, riscos, escopo e diff; sem teste de aplicação | Sem hardware. Plano contém arquitetura, ordem, testes e aceites; demais arquivos preservados |
 | 1 — bootstrap | Pacote/entrypoint, `pyproject.toml`, README mínimo e ajustes de ignore | `test_bootstrap.py`: importação silenciosa do pacote/entrypoint sem bibliotecas de hardware; execução com identificação. Compileall, pytest, Ruff e instalação limpa | Sem webcam. Pacote importável/instalável, testes passam e nenhuma captura automática; concluída no escopo autorizado, conforme seção 9 |
 | 2 — geometria e smoothing | `geometry.py`, `smoothing.py`; pontos/regiões e parâmetros passados explicitamente, sem arquivo de configuração global | RED/GREEN: zero, 3-4-5, referência inválida, valores não finitos, dimensões fornecidas, limites, clipping, regiões inválidas, espelhamento, alpha inválido/limite 1, sequência previsível, reset e regressões de arredondamento | Concluída sem hardware: 142 testes novos, 144 no total e 100% de linhas/branches nos novos módulos; evidências na seção 10 |
-| 3 — tracker e diagnóstico | `hand_tracker.py`, captura em `app.py`, desenho mínimo em `overlay.py`; preparação do modelo | `test_hand_tracker.py`/`test_app.py`: resultados sem mão/com mão, handedness ausente, BGR/RGB, timestamps, modelo ausente/inválido, câmera indisponível, leitura interrompida e limpeza com mocks. Manual: landmarks e saída com q/Esc | Webcam, modelo local e GUI. Mão/landmarks estáveis; câmera/tracker/janelas liberados em saída e exceção; falha de captura termina sem loop silencioso |
+| 3 — adaptador HandTracker | `hand_tracker.py`, `hand_landmarks.py`; modelo local documentado, sem loop de captura/overlay | TDD: conversão, handedness, nenhuma mão, 21 pontos, frame RGB, configuração, erros e limpeza; smoke com modelo real e arrays sintéticos | Concluída no escopo atualizado pelo usuário, conforme seção 11. Sem webcam/GUI obrigatórias; tracking humano e diagnóstico visual manual permanecem pendentes |
 | 4 — dedos e gestos | `gesture_detector.py` e debug básico | Fixtures sintéticas: dedos, polegar, ambas as mãos, rotações, pinça invariável por escala, limiares inclusivos, faixa de histerese, ruído, N frames, abertura, prioridade e ausência de mão | Lógica sem webcam; validação visual exige câmera. Estados e transições previsíveis, sem usar coordenada vertical isolada como regra geral |
 | 5 — cursor virtual | `action_controller.py` em dry-run, mapa/smoothing e alvo no overlay | `test_action_controller.py`: bordas, centro, clipping, margem, suavização, reset e ausência total de chamadas reais; simular tamanho de tela | Webcam/GUI para ergonomia. Alvo virtual suave e limitado; dry-run funciona sem carregar automação |
 | 6 — mouse opt-in | Backend PyAutoGUI, `--control`, clique e cooldown | Backend falso/spy e relógio injetado: clique único mantido por muitos frames, reabertura/novo clique, cooldown antes/no limite/depois, evento descartado, perda/reaquisição, backend indisponível, fail-safe e nenhuma reativação automática | Webcam, display e permissões. Manual: MOVE, pinça única, novo clique após abertura, parada pelo fail-safe e q/Esc; fallback seguro verificável |
@@ -219,9 +223,10 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após a matemática autorizada,
-a próxima fase proposta é **Fase 3 — HandTracker**, que aguardará
-instrução do usuário. O plano não libera testes reais de controle do computador
+O aceite da Fase 0 foi restrito ao documento. Após a Fase 3 autorizada,
+a próxima fase proposta é **Fase 4 — dedos e gestos**, que aguardará
+instrução do usuário. A validação visual do tracker ainda exige câmera e escopo
+de integração de captura apropriado. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
 
 ## 8. Fontes consultadas e limites da pesquisa
@@ -312,7 +317,8 @@ Referências de configuração:
 
 ## 10. Evidências da Fase 2 — geometria, coordenadas e smoothing
 
-**Estado: concluída. Fase 3 não iniciada. Nenhum acesso a hardware.**
+**Estado: concluída. Ao encerrar a Fase 2, a Fase 3 não estava iniciada.**
+Sua execução posterior está na seção 11. Nenhum acesso a hardware na Fase 2.
 
 Fonte das garantias: objetivos de geometria/EMA do usuário e Fase 2 deste plano.
 Para cada grupo, testes foram escritos e executados antes da implementação.
@@ -393,3 +399,139 @@ nenhum pacote foi instalado, removido, reinstalado ou importado para visão nest
 Os checkpoints pertencem à branch `mais` e serão mantidos; não houve push.
 Próxima fase recomendada: Fase 3, somente após instrução do usuário e preparação
 do ambiente/modelo e dos testes manuais correspondentes.
+
+## 11. Evidências da Fase 3 — HandTracker / MediaPipe
+
+**Estado: concluída no escopo de adaptador de um frame autorizado pelo usuário.**
+O pedido desta fase substituiu o loop/captura/desenho obrigatórios da proposta
+original por uma camada isolada e um smoke de webcam opcional. Não existe loop
+de webcam, overlay, gestos, smoothing no pipeline ou controle do computador.
+Tracking humano e diagnóstico visual permanecem sem aceite manual; a Fase 4
+não foi iniciada e aguarda autorização.
+
+### Inspeção antes de qualquer alteração
+
+AGENTS.md, este plano e ARCHITECTURE.md foram relidos integralmente. Git estava
+limpo na branch `mais`, base `235d659`. Python 3.11.16, Conda `hgi`; MediaPipe
+**1.0.1**, NumPy **2.4.6**; opencv-python e opencv-contrib-python **5.0.0.93**;
+nenhuma variante headless. O import real do MediaPipe funcionou e confirmou
+Tasks Vision, HandLandmarker/Options e modos IMAGE, VIDEO e LIVE_STREAM.
+
+`documentation-lookup` foi aplicado com fontes oficiais porque Context7 não
+estava exposto neste harness. O guia Python e overview oficiais consultados
+estavam atualizados em 17/08/2026, após a publicação do pacote 1.0.1. A consulta
+direta a ai.google.dev falhou; a fonte oficial developers.google.cn funcionou.
+O tag remoto v1.0.1 não foi retornado pela ferramenta; a implementação e
+docstrings **instaladas** foram inspecionadas para confirmar as assinaturas,
+resultado, enum dos 21 índices, exceções, formato de imagem e fechamento.
+Não foi usada a API legada mp.solutions.hands.
+
+OpenCV compartilha cv2 entre duas distribuições, mas não bloqueou importação
+nem a inferência IMAGE real. Nenhuma dependência foi instalada, atualizada,
+reinstalada ou removida. A recomendação para manutenção posterior continua
+manter apenas contrib, requerido pelo MediaPipe, e reparar os arquivos após
+remoção de python; não executar essa correção por causa de um conflito apenas
+potencial. Nenhum módulo HGI importa cv2 nesta fase.
+
+### Implementação e contratos
+
+Criados: `src/hgi/hand_landmarks.py`, `src/hgi/hand_tracker.py`,
+`tests/test_hand_landmarks.py`, `tests/test_hand_tracker.py` e `docs/MODELS.md`.
+Modificados: pyproject.toml, .gitignore, README, ARCHITECTURE.md e este plano.
+AGENTS.md, entrypoint, geometria e smoothing foram preservados.
+
+- IntEnum HandLandmark segue os 21 índices oficiais. NormalizedLandmark preserva
+  XYZ finitos, inclusive previsões fora do frame. Z relativo não é métrico.
+- DetectedHand guarda tuple imutável de exatamente 21 pontos e lateralidade/score
+  opcionais. Score é de handedness, não de detecção ou de cada landmark.
+- HandTracker recebe RGB uint8 H×W×3 com dimensões positivas; arruma contiguidade
+  sem trocar canais ou modificar a entrada. BGR→RGB pertence à captura futura.
+- Retorna tuple de mãos próprias do HGI; ausência é (). Apenas hand_tracker.py
+  conhece tipos MediaPipe. MediaPipe é importado na construção, não pelo pacote
+  ou modelo interno. Nenhum objeto externo escapa na saída.
+- CPU e IMAGE síncrono, sem timestamps, simplificam este incremento. Detector
+  reutilizado; num_hands e thresholds de detecção/presença validados. VIDEO e
+  LIVE_STREAM ficam para futura decisão de integração.
+- Close idempotente após sucesso e context manager garantem encerramento sob
+  exceção. Tracker fechado não processa/reabre. Falha de fechamento é explícita
+  e permite nova tentativa. Erros conhecidos recebem HandTrackerError com causa
+  original; erros inesperados e resultados inválidos não viram ausência de mão.
+- Extra vision declara mediapipe==1.0.1 e numpy>=2.4,<3; extra dev inclui NumPy
+  para testar arrays mesmo sem MediaPipe. Versões instaladas satisfazem os extras.
+  Não houve reinstalação; wheel foi construída offline, sem dependências novas.
+- Modelo preparado explicitamente, fora do runtime, ignorado pelo Git. Origem,
+  licença indicada na model card, versão e checksum estão em MODELS.md.
+
+### TDD e especificação das garantias
+
+Os dois grupos começaram com teste escrito e executado antes da implementação.
+Os RED foram erros de coleta pelo módulo HGI ausente, não 14/26 testes de runtime
+falhando. Após GREEN, validação de opções foi extraída para uma função pequena,
+mantendo 40 testes verdes antes/depois. Os testes de import ausente e dados não
+finitos ampliaram as garantias existentes, sem mocks da lógica interna.
+
+| Grupo | Comando do ciclo | RED observado | GREEN observado | Checkpoints |
+|---|---|---|---|---|
+| Modelo interno | `python -m pytest -q tests/test_hand_landmarks.py` | 1 erro de coleta: hgi.hand_landmarks ausente | 14 passaram | `4cdf01a` → `c7e0816` |
+| Adaptador, entrada e recursos | `python -m pytest -q tests/test_hand_tracker.py` | 1 erro de coleta: hgi.hand_tracker ausente | 24 passaram inicialmente; 26 após ampliar contratos | `cd7ddb4` → `5725b57` |
+
+O GREEN final do grupo executou ambos os arquivos: 40 passaram. A fronteira
+MediaPipe é substituída por fakes de fábrica, imagem, resultado e detector;
+a validação, o modelo interno e a conversão executam código real do HGI.
+
+| Garantia | Teste/arquivo | Tipo | Resultado/evidência |
+|---|---|---|---|
+| 21 índices oficiais, XYZ preservado, imutabilidade e metadados opcionais | test_hand_landmarks.py | Unitário puro | 14 PASS |
+| CPU/IMAGE, RGB preservado, arrays strided contíguos e ausência normal | test_image_mode_options_rgb_and_contiguous_input | Fronteira MediaPipe fake | PASS no pytest final |
+| Duas mãos, maior score, pontos indexáveis e nenhuma referência externa compartilhada | test_convert_two_hands_without_external_objects | Conversão real / fake externo | PASS |
+| Handedness ausente é opcional | test_handedness_can_be_absent | Contrato de resultado | PASS |
+| Entradas inválidas não chegam ao detector | test_invalid_frames_do_not_reach_detector | Contrato de entrada | PASS |
+| Número incorreto de pontos e coordenadas não finitas são rejeitados | test_malformed_results_are_errors_not_empty_detections / test_nonfinite_detector_coordinates_are_rejected | Conversão real | PASS |
+| Close, exceção do chamador, reentrada fechada e falha de shutdown | Testes de ciclo de vida em test_hand_tracker.py | Recursos na fronteira fake | PASS |
+| Modelo/import ausentes, configuração inválida e causas preservadas | Testes de erro em test_hand_tracker.py | Contratos / fake externo | PASS |
+| Modelo real inicializa, infere em duas resoluções e fecha | Smoke descrito em MODELS.md | Integração real sem câmera | PASS; zero mãos nos frames sintéticos |
+
+### Verificação final e revisão
+
+| Comando/verificação executado | Resultado |
+|---|---|
+| `python -m pytest -q` | 184 passaram, 40 novos; sem skips |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 100% total, 207 instruções/58 branches; novos módulos: 51/12 e 71/22, todos cobertos |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | Nenhum requisito quebrado; cache do pip indisponível no sandbox, sem falha |
+| `python -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir /tmp/hgi-phase3-wheels .` | PASS; wheel contém módulos novos, sem binário de modelo |
+| Modelo interno via python -I -S -B, sem site-packages | PASS, sem NumPy/MediaPipe/cv2/PyAutoGUI |
+| `python -m hgi` | Identificação preservada, sem abrir hardware |
+| Compatibilidade das versões instaladas com extras dev/vision | PASS via metadados e specifiers |
+| Revisão python-reviewer | Interfaces/docstrings, limites, dados imutáveis, erros e recursos revisados; sem CRITICAL/HIGH pendente |
+| Security-review e grep dos arquivos da fase | Sem credenciais, execução dinâmica, exceções genéricas, captura, automação ou download em runtime |
+| `git diff --check` e revisão do diff | PASS; alterações limitadas à Fase 3 |
+
+O verification-loop cobriu build, revisão de tipos, lint, testes/cobertura,
+segurança e diff. Mypy/Pyright/Bandit não estão instalados; tipos foram revisados
+manualmente e interfaces inspecionadas via AST, sem alegar checagem estática
+dedicada ou auditoria completa de dependências. A cobertura pertence ao código
+HGI, não ao MediaPipe nativo ou à qualidade do detector.
+
+### Integração real, riscos e limites
+
+Download explícito do bundle float16/1 para `/tmp` precisou de autorização de
+rede após DNS bloqueado pelo sandbox; foi concluído sem alterar dependências.
+Arquivo: 7.819.105 bytes; SHA-256 registrado em MODELS.md. Com MediaPipe real,
+dois frames RGB vazios (320×240 e 160×120) produziram (). Close e segundo close
+foram bem-sucedidos. Avisos nativos sobre feedback tensors e NORM_RECT/projeção
+foram preservados, não ocultados. Sua relevância visual requer teste com mão.
+
+Nenhum dispositivo /dev/video* estava visível: o smoke manual de webcam não foi
+executado. Não há evidência de lateralidade ou landmarks reais estáveis. Latência
+contínua, espelhamento/handedness e captura/GUI permanecem limites de integração;
+IMAGE não usa a otimização de tracking temporal de VIDEO. Instâncias do tracker
+devem ser usadas sequencialmente, sem prometer segurança entre threads.
+O aviso do fornecedor descreve métricas de uso/desempenho; não foi auditado
+tráfego da biblioteca. HGI não envia nem grava frames.
+
+Os checkpoints RED/GREEN são locais e foram preservados, sem squash ou push.
+Próxima fase recomendada: Fase 4, após autorização. A validação manual de captura
+e landmarks deverá ser realizada quando houver webcam, sem inferir PASS dos mocks.
