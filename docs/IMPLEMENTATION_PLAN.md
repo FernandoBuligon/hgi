@@ -1293,3 +1293,152 @@ sandbox; repetida com autorização de acesso ao display, somente leitura:
 `ls -l /dev/video*`: nenhum dispositivo. Smoke humano A–D e FPS/latência
 permanecem pendentes; consulta bem-sucedida não comprova movimento/clique.
 Wayland será rejeitado explicitamente no backend real, sem contorno de permissões.
+
+### Entrega e decisões
+
+**Estado: implementação e verificação automática concluídas; aceite manual
+da Fase 8 pendente por ausência de webcam.** Nenhuma fase posterior iniciada.
+
+Criados: src/hgi/real_cursor.py, tests/test_real_cursor.py,
+tests/test_real_webcam.py. Modificados: cursor.py, cursor_controller.py,
+webcam.py, overlay.py, scripts/demo_webcam.py, pyproject.toml, conftest.py,
+test_cursor_session.py, README, ARCHITECTURE e este plano. HandTracker, Camera,
+temporal.py, geometria, smoothing, detector, thresholds e click_feedback.py
+preservados. Não houve alteração de pacotes instalados. O extra opcional
+control declara PyAutoGUI==0.9.54 para instalações novas.
+
+API: RealCursorSink(*, backend=None, screen_width=None, screen_height=None),
+emit(CursorCommand), mode, screen_width, screen_height, detected_size, failed.
+Backend injetável com size(), move_to(x:int,y:int), click(x:int,y:int).
+Somente real_cursor.py importa PyAutoGUI, no construtor do adaptador. A consulta
+de resolução acontece uma vez, antes da câmera, somente com --real-control.
+Sem flag, E habilita saída virtual e nenhuma importação/consulta de automação.
+Flag sozinha mantém DISABLED. Flag+E permite somente MOVE e clique primário
+após a mesma confirmação/armamento temporal existente.
+
+Conversão: Python round, empates para par; valida originais e inteiros em
+0≤x<width, 0≤y<height, rejeitando violações. Sem clipping, nova EMA, mapeamento
+ou aceleração. CLICK faz uma chamada primária no alvo do comando; PyAutoGUI
+pode reposicionar nesse alvo. O HGI não emite MOVE adicional. NONE não usa o
+dispositivo. Overrides pareados restringem um retângulo de origem (0,0), sem
+exceder a superfície detectada. Não há seleção de monitor físico; a resolução
+X11 informada, 4480×1440, pode representar o desktop combinado. Reiniciar
+após mudanças de resolução/monitores; nenhuma consulta por frame.
+
+Fail-safe: FAILSAFE=True reafirmado antes de cada ação. PAUSE=0.1, demais
+proteções e pausa nativa preservadas; logs de screenshot desligados. Falha de
+MOVE/CLICK trava definitivamente o sink e propaga a exceção original. Controller
+e pipeline desabilitam inclusive sob KeyboardInterrupt. Disable/reset não
+emitem input; um enable posterior externo não destrava o sink. A aplicação
+encerra no primeiro erro e libera recursos. Context managers da integração
+preservam o erro primário durante falhas de fechamento e acrescentam notes;
+erro de shutdown sem erro anterior é propagado. Sem retry, rollback ou replay.
+
+Modo do overlay deriva do sink: DRY-RUN ou REAL CONTROL em vermelho,
+CONTROL ENABLED/DISABLED separado. Título da janela acompanha o modo.
+Feedback CLICK/contador de 500 ms continua somente UI, após emit bem-sucedido.
+Teclas E/D/R/Q/Esc permanecem locais ao OpenCV; Ctrl+C preservado. Cliques fora
+podem retirar o foco da janela, portanto fail-safe físico é uma alternativa
+essencial. Não foi acrescentado hook global de teclado.
+
+### TDD e checkpoints
+
+| Incremento | RED observado | GREEN observado | Commits locais |
+|---|---|---|---|
+| Sink real/adaptador/falhas | Erro de coleta: CursorMode/API real ausentes | 35 testes focados, 382 na suíte | 24c6ef7 → e131840 |
+| Duplo opt-in/resolução/overlay/cleanup | Erro de coleta: configure_output ausente | 13 novos focados, 395 na suíte | 221fcbe → cc9e0e9 |
+| Falha de mouse + falha ao fechar recursos | 6 falhas em runtime, 4 PASS no alvo -k fault | 10 PASS no mesmo alvo, 401 na suíte | 1ba1320 → 5664d8d |
+| Revisão/refactor CLI + imports tardios/shutdown isolado | Suíte já verde; sem alegar novo RED | 38 testes webcam focados, 403 finais | eac13ef |
+
+RED de coleta significa API HGI ainda não implementada, não dependência externa
+quebrada. Testes novos: **43**, sendo 22 de backend e 21 de integração real.
+Conftest bloqueia PyAutoGUI real durante pytest; testes do adaptador substituem
+o módulo por um fake. Subprocesso de dry-run usa import blocker antes de carregar
+webcam, inclusive com E. Geometria, detector, filtro temporal e controller reais
+continuam executados com mãos sintéticas e relógio falso. Nenhum teste envia
+input nativo. Commits na branch mais, sem squash, push ou publicação.
+
+| Garantia | Evidência |
+|---|---|
+| MOVE exatamente uma chamada, round, último pixel, NONE sem ação | test_real_cursor.py, MouseBackend fake |
+| CLICK exatamente um clique primário, alvo preservado e PINCH mantido sem repetição | Mesmo arquivo, controller/filtro/detector reais e fake_clock |
+| Limites/overrides inválidos não produzem input | Mesmo arquivo, rejeição antes do backend |
+| Falha MOVE/CLICK e interrupt preservam identidade da exceção, DISABLED e sink travado | Mesmo arquivo, chamadas posteriores/re-enable bloqueados |
+| FAILSAFE sempre True, PAUSE inalterada, somente APIs de mouse | Mesmo arquivo, módulo PyAutoGUI falso |
+| Dry-run default, flag seleciona real, ambas as combinações com E | test_real_webcam.py, matriz 2×2 |
+| Modo visual explícito e dimensões detectadas fornecidas ao core | Mesmo arquivo, overlay OpenCV nativo em array sintético |
+| D/R/Q impedem intenções adicionais e PINCH em DISABLED não clica | Mesmo arquivo, sink fake e teclas locais |
+| Cleanup de câmera/tracker/janelas preserva falha original de mouse ou Ctrl+C | Mesmo arquivo, 8 cenários de falha + shutdown normal defeituoso |
+| Erro ao iniciar real não abre câmera nem muda silenciosamente de modo | Mesmo arquivo, fronteira de startup fake |
+| Dry-run habilitado nunca importa automação | Mesmo arquivo, subprocesso com import blocker |
+
+### Verification-loop e revisões finais
+
+Comandos executados com /home/syl/miniconda3/envs/hgi/bin/python (3.11.16);
+equivalem aos comandos abaixo após conda activate hgi.
+
+| Comando / revisão | Resultado real |
+|---|---|
+| python -m pytest -q | **403 PASS**, zero skips/falhas |
+| python -m pytest --cov=hgi --cov-report=term-missing | **99% total**, 969 instruções, 7 ausentes, 236 branches, 5 parciais |
+| Cobertura de real_cursor / cursor / controller / overlay | **99% / 100% / 100% / 100%** |
+| Cobertura webcam / temporal | **98% / 99%** |
+| python -m ruff check . | PASS |
+| python -m ruff format --check . | PASS, 43 arquivos |
+| python -m compileall src | PASS |
+| python -m pip check | PASS, nenhum requisito quebrado; aviso de cache indisponível no sandbox sem falha |
+| git diff --check | PASS |
+| Wheel offline --no-deps --no-build-isolation --no-index | PASS em /tmp/hgi-phase8-wheels, backend incluído, requisito control correto, sem modelo/imagem/vídeo |
+| CLI --help / --real-control com modelo ausente | Ajuda PASS; ausência exit 1 esperado, mensagem MODELS.md antes de qualquer input |
+| python-reviewer / tipos / diff | Sem CRITICAL/HIGH pendente; funções modificadas de produção ≤46 linhas, interfaces tipadas, estado/erros/recursos revisados |
+| security-review / AST / scan limitado de segredos e APIs | PASS no escopo HGI; import PyAutoGUI só em real_cursor.py, apenas size/moveTo/click, FAILSAFE sempre True |
+
+Mypy/Pyright/Bandit indisponíveis; tipos revisados manualmente, sem alegar
+execução dessas ferramentas ou auditoria completa de dependências. Branch
+defensivo de ação inválida no sink não é alcançável pelo CursorCommand tipado;
+não houve teste artificial para 100%. Cobertura não comprova hardware/acurácia.
+Ruff identificou ordem de imports, linhas longas e ContextManager depreciado;
+corrigidos sem suprimir regras. A revisão reproduziu e corrigiu perda da exceção
+original por shutdown e separou parsing da CLI para manter funções pequenas.
+
+Segurança: pytest não controla mouse real. Runtime padrão não carrega PyAutoGUI;
+real exige duplo opt-in. Não há teclado de saída, clipboard, drag/scroll, atalhos
+globais, comandos externos, consulta sensível, gravação/transmissão de frames
+ou download em runtime. Uma ação já recebida pelo SO antes de falha não pode
+ser desfeita; sink fica parado sem reenviar. Nenhum movimento/clique real foi
+gerado pelo agente nesta sessão. A única operação nativa PyAutoGUI foi consulta
+de tela/fail-safe/pausa, somente leitura.
+
+### Smoke manual, performance e limitações
+
+| Etapa solicitada | Resultado nesta sessão |
+|---|---|
+| A — regressão webcam dry-run | Não executada: /dev/video* ausente; regressão sintética PASS |
+| B — real DISABLED com POINT/PINCH humanos | Não executada pelo mesmo motivo; opt-in/RAW sintéticos PASS |
+| C — POINT real, quatro direções, depois D | Pendente de webcam e ambiente preparado; capacidade de mover não homologada |
+| D — PINCH único, mantido, abrir/rearmar, segundo clique | Pendente; sem clique nativo executado; contrato sintético PASS |
+| Resolução/backend X11 | Consulta real somente leitura PASS: PyAutoGUI 0.9.54, 4480×1440, FAILSAFE True, PAUSE 0.1 |
+| FPS dry-run / real / latência percebida | Não medidos; não reportar dados sintéticos como FPS real |
+
+A pausa de 100 ms por MOVE/CLICK pode limitar o loop sob movimento contínuo
+a cerca de 10 Hz ou menos com inferência/captura. Estimativa pela configuração
+confirmada, não benchmark. Preservada para segurança; nenhuma otimização
+prematura. DOCUMENTATION-LOOKUP: documentação oficial e fonte instalada
+confirmam size, moveTo, click primário, pausa e fail-safe.
+
+Fontes: [PyAutoGUI: fail-safe/PAUSE](https://pyautogui.readthedocs.io/en/latest/index.html#fail-safes)
+e [coordenadas/mouse](https://pyautogui.readthedocs.io/en/latest/mouse.html).
+
+Antes de smoke real: salvar trabalhos, evitar alvos destrutivos e terminais
+com comandos, manter janela acessível, conhecer D/R/Q/Esc/Ctrl+C e canto de
+fail-safe. Executar roteiro A–D nessa ordem, pequenos movimentos antes de
+cliques em área inofensiva; registrar direção, CLICK visual versus real,
+foco, FPS/latência e PINCH mantido/reaberto. Não pular diretamente ao clique.
+
+Limites: Linux real somente X11 com permissões; Wayland explicitamente rejeitado
+sem contornos. Foco da janela necessário para teclas; pausas/driver/inferência
+nativa podem atrasar parada. Sem suporte avançado multi-monitor, hotplug ou
+monitor físico escolhido. Windows/macOS e ergonomia não homologados. Gestos
+2D/IMAGE mantêm limitações anteriores de ruído/oclusão/FPS. Nenhum threshold
+recalibrado. **Próximo passo recomendado: concluir aceite manual da própria
+Fase 8; só depois planejar a próxima fase sob nova autorização.**

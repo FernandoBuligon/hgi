@@ -1,8 +1,9 @@
 # HGI — Hand Gesture Interface
 
 Projeto local de visão computacional para interpretar gestos da mão.
-**Fase 7 implementada: webcam, overlay e pipeline completo em dry-run.**
-A demo visual interpreta a mão e mostra intenções virtuais. A validação com
+**Fase 8 implementada: backend real com duplo opt-in e fail-safe.**
+**Dry-run é o modo padrão.** A demo visual interpreta a mão e mostra intenções.
+Mouse real exige `--real-control` e depois E na janela. A validação com
 webcam humana permanece pendente nesta sessão, pois não há `/dev/video*`.
 `python -m hgi` continua sendo o entrypoint mínimo que identifica o projeto.
 
@@ -63,7 +64,7 @@ Prepare explicitamente o modelo conforme [MODELS.md](docs/MODELS.md). Na raiz,
 com o ambiente ativado e HGI instalado:
 
 ```bash
-python scripts/demo_webcam.py
+python scripts/demo_webcam.py --model models/hand_landmarker.task --camera 1
 ```
 
 O caminho padrão é `models/hand_landmarker.task`. Para outro caminho/câmera ou
@@ -75,23 +76,24 @@ python scripts/demo_webcam.py --model /caminho/hand_landmarker.task --camera 0 \
 ```
 
 Não há download automático. Modelo ausente encerra com mensagem apontando para
-MODELS.md. As dimensões da tela são lógicas; nenhum monitor real é consultado.
+MODELS.md. Em dry-run as dimensões são lógicas (1920×1080 por padrão);
+nenhum monitor real é consultado. Forneça largura e altura juntas ao sobrescrever.
 A câmera pode ignorar a resolução pedida: a integração usa `frame.shape` para
 desenho e correção de proporção das medidas. Se as dimensões entregues mudarem,
 a sessão é reiniciada DISABLED; habilite novamente com E.
 
 | Tecla com foco na janela OpenCV | Efeito |
 |---|---|
-| E | Habilita apenas intenções virtuais |
+| E | Habilita a sessão no backend selecionado |
 | D | Desabilita e limpa a interação |
 | R | Reset da interação e contador visual, permanecendo DISABLED |
 | Q / Esc | Encerra e libera câmera, tracker e janelas |
 
 Também é possível fechar a janela. A sessão começa **DISABLED**; nenhuma mão
-a habilita automaticamente. `CONTROL: ENABLED` significa exclusivamente
-autorizar a saída dry-run. A demo não aceita `--control` e não importa PyAutoGUI.
-MOVE/CLICK são dataclasses em memória; nenhum mouse, clique ou tecla do sistema
-é acionado. Teclas são lidas somente por `cv2.waitKey`, na janela da demo.
+a habilita automaticamente. Sem `--real-control`, E autoriza somente intenções
+em memória: nenhum mouse ou clique real ocorre e PyAutoGUI não é carregado.
+A flag antiga `--control` não é aceita. Teclas são lidas somente por
+`cv2.waitKey`, na janela da demo; HGI não envia teclas ao sistema.
 Não são gravados nem transmitidos frames pelo código HGI.
 
 O overlay mostra modo, handedness/confiança Left/Right, RAW/STABLE, candidato,
@@ -125,17 +127,93 @@ Exige webcam acessível e sessão gráfica funcional com OpenCV GUI. No Linux,
 ausência de DISPLAY/WAYLAND_DISPLAY produz erro claro antes da captura. Variável
 presente não garante conexão/driver/plugin gráfico funcional; a wheel QT5 deste
 ambiente usa X11/XWayland conforme suporte local. Windows/macOS podem exigir
-permissão de câmera. Esta demo não precisa de permissão para automação de entrada.
+permissão de câmera. Dry-run não precisa de permissão para automação de entrada.
 Falhas de captura/inferência/desenho encerram com limpeza; geometria degenerada
 gera erro explícito, em vez de inventar um gesto. Q/Esc são processados entre
 frames; captura ou inferência nativa bloqueada pode atrasar a resposta.
 
-Validação automatizada: **360 testes**, **99% de cobertura total**, Ruff check e
+Validação automatizada: **403 testes**, **99% de cobertura total**, Ruff check e
 format aprovados. Testes de câmera/janela usam fakes; o overlay usa OpenCV real
 sobre arrays sintéticos sem display. POINT/PINCH foram validados sinteticamente.
 FPS real, lateralidade, ergonomia, jitter e qualidade de detecção humana ainda
 exigem webcam. IMAGE continua síncrono, sem otimização temporal do modo VIDEO.
 Veja o roteiro manual e evidências em [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
+## Controle real — opt-in explícito
+
+O extra opcional `control` declara PyAutoGUI **0.9.54**. No ambiente HGI atual
+ele já está instalado; nenhuma dependência foi alterada. Em ambiente novo:
+
+```bash
+python -m pip install -e ".[vision,control]"
+python scripts/demo_webcam.py \
+  --model models/hand_landmarker.task \
+  --camera 1 \
+  --real-control
+```
+
+| Execução | E na janela | Resultado |
+|---|---|---|
+| Padrão, sem flag | Sim | Apenas dry-run |
+| `--real-control` | Não | Sessão DISABLED, nenhum input |
+| `--real-control` | Sim | MOVE e CLICK reais após os gates temporais |
+
+O overlay e o título mostram **HGI | REAL CONTROL**, com cabeçalho vermelho,
+ou **HGI | DRY-RUN**; CONTROL ENABLED/DISABLED é um estado separado. A flag
+nunca habilita a sessão sozinha. D desabilita, R reseta e desabilita, Q/Esc
+encerra. Ctrl+C no terminal também encerra com limpeza. Disable/reset não
+emitem movimento nem clique. As teclas da janela exigem foco; clicar em outra
+aplicação pode retirar esse foco. O fail-safe físico continua disponível.
+
+Somente o backend consulta a resolução em modo real, uma vez ao iniciar.
+`--screen-width` **e** `--screen-height`, quando fornecidos juntos, sobrescrevem
+essa resolução com um retângulo cuja origem é (0,0); devem ser positivos e não
+exceder as dimensões detectadas. O pipeline continua recebendo somente números.
+Reinicie a demo após alterar a configuração dos monitores. Não há seleção ou
+mapeamento avançado de múltiplos monitores. Neste X11, PyAutoGUI informa
+**4480×1440**, que pode representar a superfície combinada do servidor X.
+
+`RealCursorSink(backend=None, screen_width=None, screen_height=None).emit(command)`
+implementa CursorSink. O backend pode ser injetado (`size`, `move_to`, `click`).
+MOVE encaminha as coordenadas existentes, arredondadas uma vez por `round`
+(empates para o inteiro par), sem novo smoothing, clipping ou aceleração.
+Coordenadas fora dos limites, inclusive após round, são rejeitadas antes do input.
+CLICK chama uma vez `click` primário no alvo do comando, sem MOVE adicional do
+HGI; PyAutoGUI pode reposicionar para clicar nesse alvo. NONE não chama o mouse.
+Debounce, histerese, armamento e cooldown continuam exclusivamente no filtro
+temporal. Um comando CLICK corresponde a um clique; a UI não repete comandos.
+
+`FAILSAFE=True` é garantido na construção e antes de cada ação. Mover fisicamente
+o mouse a um canto dispara o fail-safe na próxima chamada do PyAutoGUI. Uma
+falha em MOVE/CLICK, incluindo fail-safe, trava o sink, desabilita a sessão e
+propaga a exceção original, sem retry. A demo encerra e libera recursos;
+falhas simultâneas de fechamento são anexadas à exceção original como notas.
+Para tentar novamente é necessário reiniciar a demo. Não há rollback de uma
+ação que o SO já tenha recebido antes da falha.
+
+A pausa nativa `PAUSE=0.1` foi preservada, assim como outras proteções do
+fornecedor. Cada MOVE/CLICK pode acrescentar 100 ms; durante movimento contínuo
+isso limita o loop a aproximadamente 10 FPS ou menos, considerando também a
+visão. É uma estimativa pelo custo configurado, **não FPS observado**. Não foi
+reduzida a pausa para otimizar desempenho. Referência: [fail-safe e pausa do
+PyAutoGUI](https://pyautogui.readthedocs.io/en/latest/index.html#fail-safes).
+
+No Linux, o backend real usa X11 e exige acesso autorizado ao display. Wayland
+é rejeitado explicitamente, inclusive quando há XWayland; use dry-run. Variáveis
+de ambiente não garantem permissão de input. macOS pode exigir Acessibilidade;
+Windows/macOS precisam de validação manual. Não há contorno de permissões.
+
+Antes do smoke real, salve trabalhos, mantenha a janela HGI acessível e conheça
+D/R/Q/Esc/Ctrl+C e o fail-safe. Evite botões destrutivos e terminais com comandos.
+Teste nesta ordem: dry-run; real DISABLED sem E; POINT com movimentos pequenos
+nas quatro direções e D; depois dois PINCH em área inofensiva, confirmando um
+clique por pinça e nenhuma repetição ao mantê-la fechada. Registre FPS dos dois
+modos e latência percebida. Sem webcam nesta sessão, essas etapas e movimento/
+clique reais não foram testados. A consulta somente leitura ao X11 funcionou.
+
+Pytest usa backends falsos e bloqueia o carregamento do PyAutoGUI real; nenhum
+teste controla o mouse. Revisões Python/segurança e verification-loop estão
+registrados no plano. Drag, scroll, teclado, volume e extras não foram implementados.
 
 ## Matemática disponível
 
@@ -219,8 +297,8 @@ fornecidas pelo chamador. `mirror_x=True` espera imagem não espelhada;
 desative-o se a entrada já foi espelhada. Reset/disable desabilitam, limpam a
 interação e preservam o log. Defaults: confirmação de 80 ms, histerese 0.25/0.32,
 cooldown de 300 ms e grace period de 150 ms. Perda breve preserva EMA e não
-rearma pinça; perda longa exige confirmação/abertura novas. Não há backend de
-mouse ou consulta ao monitor. A demo abaixo usa tempo simulado.
+rearma pinça; perda longa exige confirmação/abertura novas. Esse exemplo e a
+demo abaixo usam somente o sink virtual; o controller não consulta hardware.
 
 Para configurar ou testar tempo, injete
 `TemporalGestureFilter(TemporalConfig(...), clock=seu_clock)` no parâmetro
@@ -234,6 +312,5 @@ python scripts/demo_cursor.py
 
 Veja os contratos e limitações em [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 e [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
-A implementação da Fase 7 termina nesta integração dry-run; o controle real
-continua adiado e exige autorização própria. Próximo passo: smoke com webcam
-e observação exploratória dos defaults, antes de qualquer backend real ou extras.
+O próximo passo é o aceite manual da própria Fase 8 com webcam e movimentos
+pequenos, incluindo fail-safe e foco da janela. Nenhuma fase posterior foi iniciada.

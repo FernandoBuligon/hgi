@@ -1,4 +1,4 @@
-# Arquitetura do HGI — estado após a implementação da Fase 7
+# Arquitetura do HGI — estado após a implementação da Fase 8
 
 O núcleo matemático usa somente a biblioteca padrão Python. O entrypoint identifica o
 projeto e encerra. Geometria e smoothing não fazem I/O, não consultam relógio/FPS,
@@ -6,9 +6,9 @@ não obtêm dimensões reais e não importam bibliotecas de visão ou automaçã
 O adaptador de visão usa NumPy e importa MediaPipe somente ao construir o tracker.
 O modelo interno de mão e o reconhecimento geométrico usam somente Python padrão.
 O cursor virtual exige enable explícito e filtra temporalmente as observações.
-Começa DISABLED e emite somente intenções para um sink em memória. Ações reais
-permanecem propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
-A demo visual dedicada integra webcam e OpenCV com esse núcleo em dry-run.
+Começa DISABLED e usa um sink em memória por padrão. A Fase 8 acrescenta um
+backend real isolado, selecionado por flag e habilitado separadamente com E.
+A demo visual integra webcam e OpenCV com esse núcleo sem mudar os gestos.
 
 ## API atual
 
@@ -50,7 +50,7 @@ essa região; inverter o frame inteiro e inverter novamente o ponto seria duplic
 o espelhamento. Essa coerência deverá ser validada na integração futura.
 
 Não há arredondamento antecipado nem consulta ao monitor. A conversão em posições
-inteiras do backend será responsabilidade do controlador futuro. Coordenadas não
+inteiras é responsabilidade exclusiva do backend real. Coordenadas não
 finitas, regiões vazias e referências de distância não positivas geram ValueError;
 resultados de distância além da capacidade dos floats também são rejeitados.
 Os tipos documentados devem ser respeitados pelos chamadores.
@@ -78,8 +78,8 @@ resetar após perda/troca de tracking evita reaproveitar posições antigas.
 
 Os testes usam somente pontos e dimensões sintéticos: distância, escalas, bordas,
 clipping, margens, espelhamento, parâmetros inválidos, overflow e sequências EMA.
-Os resultados e checkpoints RED/GREEN estão registrados no plano. Controle real
-continua sem implementação; hardware ainda não foi validado. Os testes de dedos
+Os resultados e checkpoints RED/GREEN estão registrados no plano. Backend real
+tem testes com fakes; hardware ainda não foi validado. Os testes de dedos
 e gestos operam exclusivamente sobre mãos sintéticas internas, sem mocks.
 
 ## Fronteira de visão
@@ -300,11 +300,11 @@ A integração com captura/exibição pertence a webcam.py e à demo dedicada.
 | `DryRunCursorSink(max_history=None)` | Recebe todos os comandos, inclusive NONE; limite opcional descarta os mais antigos |
 | `sink.commands` | Snapshot tuple imutável; não expõe a lista interna |
 | `CursorConfig(screen_width, screen_height, ...)` | Dataclass imutável e validada; dimensões lógicas fornecidas explicitamente |
-| `CursorController(config, *, sink=None, detector=None, temporal=None)` | Começa DISABLED; usa somente DryRunCursorSink, detector/filtro padrão e EMA própria |
+| `CursorController(config, *, sink=None, detector=None, temporal=None)` | Começa DISABLED; aceita CursorSink, com DryRunCursorSink padrão, detector/filtro e EMA própria |
 | `controller.update(hand)` | Retorna e emite o mesmo CursorCommand uma vez por atualização válida |
 | `controller.enable()` / `disable()` | Opt-in explícito / desarme; sem comando emitido pelos métodos |
 | `controller.reset()` | Desabilita e limpa EMA, posição e todo estado temporal; preserva histórico do sink |
-| `controller.state` | ControlState.DISABLED ou ENABLED, somente leitura; ENABLED continua dry-run |
+| `controller.state` | ControlState.DISABLED ou ENABLED, somente leitura; independente do backend |
 | `controller.config` / `controller.sink` | Propriedades somente leitura para inspeção |
 | `controller.observation` / `controller.position` | Última observação habilitada e posição virtual; snapshots imutáveis, sem consultas externas |
 
@@ -355,9 +355,9 @@ lógica, inclusive sob arredondamentos. Não há compensação por FPS.
 O filtro temporal confirma PINCH e autoriza CLICK somente armado e fora do
 cooldown. PINCH mantido emite NONE. A entrada de pinça congela MOVE imediatamente,
 inclusive enquanto ainda instável. CLICK usa a última posição virtual, já
-suavizada; sem MOVE anterior, usa o indicador mapeado sem inicializar a EMA. Isso define um alvo lógico, sem
-reposicionar ou consultar o cursor real. A próxima camada deverá decidir como
-executar esse contrato de maneira segura.
+suavizada; sem MOVE anterior, usa o indicador mapeado sem inicializar a EMA. Isso
+define um alvo lógico sem consultar o cursor real. RealCursorSink encaminha
+um clique primário nesse alvo; o backend pode reposicionar para executá-lo.
 
 PINCH preserva posição/EMA, permitindo retomar POINT com suavização. Ausência
 emite NONE e congela saída, preservando movimento durante o grace period.
@@ -370,13 +370,13 @@ original, sem falso sucesso, retry ou clique pendente.
 
 ### Segurança, observação e limites
 
-O sink implementado apenas adiciona dataclasses a uma lista privada. Nenhum
-mouse real é movido, clique real ocorre ou teclado é controlado. Nenhum módulo
-desta camada importa PyAutoGUI, OpenCV, MediaPipe ou NumPy. A fonte padrão de
+DryRunCursorSink apenas adiciona dataclasses a uma deque privada, sem input.
+Nenhum módulo do núcleo cursor/controller importa PyAutoGUI, OpenCV, MediaPipe
+ou NumPy. RealCursorSink é uma fronteira separada, descrita abaixo. A fonte padrão de
 tempo é monotonic, injetada somente na borda do filtro; não há APIs de automação.
-Configuração e dados finitos são validados; nenhum download, segredo, execução
-dinâmica ou captura foi acrescentado. O Protocol permite futura extensão, mas
-a implementação e os testes atuais usam somente saída em memória.
+Configuração e dados finitos são validados; nenhum download, segredo ou execução
+dinâmica foi acrescentado. CursorSink exige somente emit(command); o controller
+não conhece o backend, consulta de monitor ou mecanismo de input.
 
 Demo finita, com mãos sintéticas e nenhuma biblioteca de hardware:
 
@@ -395,8 +395,8 @@ pelo chamador. Controller/sink são sequenciais, sem garantia entre threads.
 O histórico do sink cresce sem limite por padrão, adequado a testes/demos finitas;
 a demo contínua usa max_history=1, mantendo somente o último comando.
 Ergonomia, precisão das heurísticas e espelhamento da captura real continuam
-dependendo de validação manual posterior. Controle real permanece adiado;
-a integração da Fase 7 está descrita abaixo.
+dependendo de validação manual posterior. A integração da Fase 7 e o backend
+real da Fase 8 estão descritos abaixo.
 
 ## Proteção temporal e opt-in
 
@@ -477,17 +477,16 @@ Não compartilhar uma instância entre mãos ou threads; handedness não é iden
 | Perda prolongada | Mantém opt-in, limpa interação/movimento, mantém cooldown; exige abertura confirmada |
 | Exceção de detector/filtro/mapeamento/sink | Desabilita, limpa e relança a exceção original; nenhum retry |
 
-Os except Exception existem apenas nas fronteiras para limpar e relançar,
+As capturas de exceção existem nas fronteiras para limpar e relançar,
 sem ocultar falhas. Re-enable é uma sessão nova e exige confirmação/abertura;
 nunca conserva clique pendente. Controller.reset também desabilita, uma mudança
 de segurança em relação à Fase 5. O reset direto do filtro limpa somente seu
 estado; sessões devem usar controller.reset para limpar também opt-in e EMA.
 
-O sink permanece exclusivamente DryRunCursorSink; ControlState.ENABLED significa
-autorizar intenções virtuais. Não foi implementado PyAutoGUI, mouse, teclado,
-consulta de monitor ou configuração persistente. A Fase 7 acrescenta captura e
-GUI em dry-run. Antes do controle real ainda serão necessários backend/fail-safe
-e QA manual autorizados separadamente. O MVP completo continua pendente.
+DryRunCursorSink permanece padrão; ControlState.ENABLED autoriza intenções no
+sink selecionado. A Fase 8 oferece somente mouse MOVE/CLICK real, mantendo
+temporal.py intacto. Não há teclado, configuração persistente ou extras.
+O aceite manual de hardware e o MVP completo continuam pendentes.
 
 ## Integração visual da Fase 7
 
@@ -526,13 +525,15 @@ flowchart LR
   em memória sem modificar dimensões. Nenhuma imagem é salva pelo runtime.
 - `scripts/demo_webcam.py`: argparse, configuração e diagnóstico de erros
   conhecidos. Modelo ausente aponta para MODELS.md. Não abre hardware ao importar,
-  não possui flag de backend real e `--help` não carrega bibliotecas de visão.
+  possui `--real-control` com sessão inicial DISABLED; `--help` não carrega
+  bibliotecas de visão ou PyAutoGUI.
 
 Dimensões da captura podem diferir das solicitadas (640×480 por padrão).
 `frame.shape` define proporção para GestureConfig e transformação para pixels
 do overlay. Mudança de dimensões descarta sessão anterior e começa DISABLED.
-O modelo pesado não é reconstruído por frame. A tela lógica padrão é 1920×1080;
-nenhuma consulta de monitor. Margens de 0.1..0.9 e alpha 0.25 permanecem iguais.
+O modelo pesado não é reconstruído por frame. Em dry-run a tela padrão é
+1920×1080, sem consulta de monitor. Em modo real o backend fornece dimensões.
+Margens de 0.1..0.9 e alpha 0.25 permanecem iguais.
 
 Espelhamento é feito antes do tracker; portanto mirror_x=False no controller
 da demo, evitando reflexão duplicada. A entrada original de Camera permanece
@@ -551,7 +552,7 @@ também a observação. Não há acesso aos campos privados do filtro pelo overl
 FPS usa monotonic na aplicação, separado do clock do filtro. É 1/intervalo entre
 iterações e aparece com uma amostra de atraso (primeira: zero). Inclui captura,
 inferência e trabalho de exibição anterior; não prova latência ponta a ponta.
-O sink da demo usa deque(maxlen=1); o default público continua sem limite para
+O sink virtual da demo usa deque(maxlen=1); o default público continua sem limite para
 compatibilidade com os testes/demos finitas anteriores.
 
 O overlay distingue CONTROL: ENABLED/DISABLED de DRY-RUN, mostrando mão,
@@ -586,9 +587,10 @@ debounce, histerese, cooldown, emissão e retenção do sink não foram alterado
 run_webcam valida modelo e sessão gráfica antes da captura. Context managers
 liberam câmera/tracker sob falhas; finally desabilita e destrói janelas. Erros
 inesperados são relançados; não viram ausência de mão. Q/Esc e fechamento da
-janela encerram; E habilita somente intenções, D/R desabilitam/limpam. waitKey
-é a única leitura de teclado. Não há mouse/clique/tecla real, clipboard, comando
-externo, consulta sensível ou gravação/transmissão de frames no código HGI.
+janela encerram; E habilita intenções no sink selecionado, D/R desabilitam/limpam.
+waitKey é a única leitura de teclado. O backend real pode mover/clicar após duplo
+opt-in. Não há envio de teclas, clipboard, comando externo, consulta sensível
+ou gravação/transmissão de frames no código HGI.
 
 Teste normal usa frames sintéticos, fake tracker/captura/janela e geometria,
 temporalidade, sink e desenho reais. Native OpenCV sobre arrays não exige display.
@@ -597,3 +599,91 @@ tracking temporal de VIDEO; FPS real e ergonomia não foram homologados.
 Plugins/display ou drivers nativos defeituosos podem falhar fora das exceções
 Python. Q/Esc são lidos entre frames; bloqueio nativo de captura/inferência pode
 atrasar encerramento. Nenhum threshold foi recalibrado ou feature extra adicionada.
+
+## Backend real da Fase 8
+
+```mermaid
+flowchart LR
+    F[Flag --real-control] --> S[configure_output]
+    S --> V[DryRunCursorSink por padrão]
+    S --> R[RealCursorSink somente opt-in]
+    R --> D[Dimensões detectadas ou override válido]
+    D --> C[CursorConfig: somente dados]
+    C --> K[CursorController: DISABLED até E]
+    K --> I[CursorCommand]
+    I --> V
+    I --> R
+    R --> P[PyAutoGUIBackend: MOVE / clique primário]
+```
+
+`real_cursor.py` é o único módulo de produção que importa PyAutoGUI, somente no
+construtor de PyAutoGUIBackend. Importar webcam/overlay/core ou usar dry-run não
+carrega a dependência de automação. Não há efeitos ao importar ou construir o
+sink: apenas configuração e consulta de resolução. `control` é um extra opcional
+com PyAutoGUI==0.9.54; visão/dev não exigem a biblioteca. Nenhum pacote instalado
+foi alterado na Fase 8.
+
+| API | Contrato |
+|---|---|
+| `MouseBackend` | Protocol size() → tuple[int,int], move_to(x:int,y:int), click(x:int,y:int) |
+| `PyAutoGUIBackend()` | Import tardio, X11 no Linux, FAILSAFE=True, PAUSE preservada |
+| `RealCursorSink(backend=None, screen_width=None, screen_height=None)` | Backend injetável; consulta size uma vez; override pareado dentro dos limites |
+| `sink.emit(command)` | NONE sem ação; MOVE uma chamada; CLICK um clique primário no alvo |
+| `sink.screen_width / screen_height / detected_size` | Dimensões efetivas/detectadas somente leitura, sem consultas posteriores |
+| `sink.failed` | Latch permanente após falha de ação; reconstrução necessária |
+| `CursorMode` / `sink.mode` | DRY-RUN ou REAL CONTROL; independente de ControlState |
+| `DemoConfig.real_control` | False por padrão; seleção explícita sem enable automático |
+| `configure_output(config)` | Retorna CursorConfig e sink escolhido, antes da captura |
+| `WebcamPipeline(..., sink=None)` | Sink virtual padrão; modo no overlay deriva do sink |
+
+Na CLI, os dois argumentos de resolução têm default None. Em dry-run, None
+resolve para 1920×1080 sem consulta; real resolve pela tela detectada. Overrides
+exigem largura/altura juntas e positivas. Em real, não podem exceder a tela e
+representam um retângulo de origem (0,0), sem selecionar monitor ou offset.
+O sink converte subpixels por Python round (empates para par), valida números
+originais/arredondados em 0≤x<width, 0≤y<height e rejeita violações antes de input.
+Não recalcula EMA, mapeamento ou clipping. CLICK utiliza a posição contida no
+comando em uma chamada PyAutoGUI.click(clicks=1, button="primary"); não há MOVE
+extra do HGI, debounce no sink nem fila/replay. A biblioteca pode reposicionar
+o mouse para clicar nesse alvo. Screenshots de log ficam explicitamente desligados.
+
+O controller aceita CursorSink por emit callable, sem importar backend ou SO.
+Nada muda em TemporalGestureFilter, thresholds, histerese, armamento, cooldown
+ou matemática do cursor. Construção começa DISABLED. Flag+sem E não gera input;
+E sem flag continua virtual. D/R/Q/Esc desabilitam sem emissão adicional.
+Mudança de dimensões da captura reinicia DISABLED com o mesmo sink; um sink
+travado por falha continua travado. Não há recuperação automática.
+
+Qualquer falha em MOVE/CLICK, inclusive FailSafeException ou KeyboardInterrupt,
+trava o sink e propaga a mesma exceção. Controller/pipeline usam cleanup+raise,
+desabilitando imediatamente. NONE continua inofensivo; até um enable externo
+posterior não permite novas ações no sink travado. O loop normal encerra no
+primeiro erro. Context managers da aplicação preservam a exceção original se
+câmera/tracker também falharem ao fechar, acrescentando notes; erro de fechamento
+sem falha anterior propaga normalmente. Janelas têm a mesma política. Nenhuma
+ação já entregue ao SO pode ser desfeita por esse mecanismo.
+
+O adaptador garante FAILSAFE=True antes de cada ação, nunca usa _pause=False e
+não altera PAUSE, MINIMUM_DURATION ou proteções do fornecedor. MOVE passa
+duration=0: somente a EMA existente suaviza. PAUSE=0.1 acrescenta custo por
+comando, estimando no máximo cerca de 10 Hz sob MOVE contínuo antes do custo de
+visão. Não é medição de FPS/latência real; foi documentado sem alterar defaults.
+
+REAL CONTROL aparece em vermelho no cabeçalho e no título da janela, com
+CONTROL ENABLED/DISABLED separado. Feedback CLICK de 500 ms/contador permanece
+somente UI e recebe a ação depois de emit bem-sucedido; falha de clique não é
+contabilizada como sucesso. Fechar a pinça não cria comandos extras da UI.
+
+Limites: X11 com acesso ao servidor X; Wayland rejeitado, inclusive XWayland,
+sem contornar permissões. PyAutoGUI nesta sessão informou 4480×1440, possivelmente
+desktop combinado X11, sem identificação de monitor físico. Reiniciar após mudar
+resolução/configuração. Windows/macOS precisam de teste e permissões adequadas.
+Teclas OpenCV dependem de foco; clicar fora pode retirar o foco, deixando o
+fail-safe físico e Ctrl+C no terminal como alternativas. Nenhum atalho global.
+Chamadas nativas e a pausa podem atrasar a próxima leitura de tecla.
+
+Testes usam somente fakes de mouse e proíbem PyAutoGUI real. Cobrem duplo opt-in,
+modo visual, resolução, limites/round, exatamente uma chamada, PINCH sustentado,
+falhas/interrupts e fechamento simultaneamente defeituoso. Consulta X11 real foi
+somente leitura, FAILSAFE=True e PAUSE=0.1. Sem /dev/video*, smoke A–D, FPS,
+direção física, acurácia e cliques humanos continuam pendentes no plano.
