@@ -28,9 +28,11 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     detector = Mock(spec=["detect", "close"])
     detector.detect.return_value = result([])
     factory = Mock(return_value=detector)
+    base_options = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
+    base_options.Delegate = SimpleNamespace(CPU="CPU")
     mp = SimpleNamespace(
         tasks=SimpleNamespace(
-            BaseOptions=lambda **kwargs: SimpleNamespace(**kwargs),
+            BaseOptions=base_options,
             vision=SimpleNamespace(
                 HandLandmarker=SimpleNamespace(create_from_options=factory),
                 HandLandmarkerOptions=lambda **kwargs: SimpleNamespace(**kwargs),
@@ -66,6 +68,7 @@ def test_image_mode_options_rgb_and_contiguous_input(
         assert tracker.process(frame) == ()
         options = boundary.factory.call_args.args[0]
         assert options.base_options.model_asset_path == str(model.resolve())
+        assert options.base_options.delegate == "CPU"
         assert options.running_mode == "IMAGE"
         assert options.num_hands == 2
         assert options.min_hand_detection_confidence == 0.6
@@ -248,4 +251,27 @@ def test_unexpected_errors_propagate(boundary: SimpleNamespace, model: Path) -> 
     with pytest.raises(OSError, match="unexpected"):
         with HandTracker(model) as tracker:
             tracker.process(np.zeros((1, 1, 3), dtype=np.uint8))
+    boundary.detector.close.assert_called_once()
+
+
+def test_missing_mediapipe_has_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+    model: Path,
+) -> None:
+    monkeypatch.setitem(sys.modules, "mediapipe", None)
+    with pytest.raises(HandTrackerError, match="vision extra") as caught:
+        HandTracker(model)
+    assert isinstance(caught.value.__cause__, ModuleNotFoundError)
+
+
+def test_nonfinite_detector_coordinates_are_rejected(
+    boundary: SimpleNamespace,
+    model: Path,
+) -> None:
+    malformed = raw_hand()
+    malformed[8].x = float("nan")
+    boundary.detector.detect.return_value = result([malformed])
+    with pytest.raises(ValueError, match="finite"):
+        with HandTracker(model) as tracker:
+            tracker.process(np.zeros((2, 2, 3), dtype=np.uint8))
     boundary.detector.close.assert_called_once()
