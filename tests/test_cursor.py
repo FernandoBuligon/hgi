@@ -72,6 +72,7 @@ def test_cursor_layer_only_imports_standard_library_and_pure_hgi_modules() -> No
     import hgi.cursor_controller
 
     allowed = {
+        "collections",
         "dataclasses",
         "enum",
         "typing",

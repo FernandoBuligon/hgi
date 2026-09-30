@@ -34,7 +34,9 @@ def state(hand=None, action=CursorAction.NONE):
 @pytest.mark.parametrize("shape", [(480, 640, 3), (240, 320, 3)])
 def test_overlay_keeps_bgr_dimensions_and_accepts_actions(hand_factory, shape, action):
     frame = np.zeros(shape, dtype=np.uint8)
-    result = draw_overlay(frame, state(hand_factory("index"), action), CursorConfig(1920, 1080))
+    result = draw_overlay(
+        frame, state(hand_factory("index"), action), CursorConfig(1920, 1080)
+    )
     assert result is frame and result.shape == shape and result.dtype == np.uint8
     assert np.any(result)
 
@@ -59,16 +61,30 @@ def test_draws_all_landmarks_highlights_indicator_and_actual_active_region(
     frame = np.zeros((120, 160, 3), np.uint8)
     draw_overlay(frame, state(hand_factory("index")), CursorConfig(1920, 1080))
     assert circle.call_count == 22  # 21 landmarks plus the index highlight.
-    assert any(call.args[1:3] == ((16, 12), (143, 107)) for call in rectangle.call_args_list)
+    assert any(
+        call.args[1:3] == ((16, 12), (143, 107)) for call in rectangle.call_args_list
+    )
 
 
 def test_labels_explain_virtual_click_temporal_state_and_target(hand_factory):
     hand = replace(hand_factory("index"), handedness_score=0.97)
-    lines = "\n".join(overlay_lines(state(hand, CursorAction.CLICK), CursorConfig(1920, 1080)))
+    lines = "\n".join(
+        overlay_lines(state(hand, CursorAction.CLICK), CursorConfig(1920, 1080))
+    )
     for label in (
-        "Hand: Right", "0.97", "RAW: PINCH", "STABLE: PINCH", "candidate: PINCH",
-        "Pinch: 0.18", "armed: no", "cooldown: active", "Cursor: 100, 200",
-        "Action: CLICK", "normalized:", "screen target:", "FPS: 27.4",
+        "Hand: Right",
+        "0.97",
+        "RAW: PINCH",
+        "STABLE: PINCH",
+        "candidate: PINCH",
+        "Pinch: 0.18",
+        "armed: no",
+        "cooldown: active",
+        "Cursor: 100, 200",
+        "Action: CLICK",
+        "normalized:",
+        "screen target:",
+        "FPS: 27.4",
     ):
         assert label in lines
 

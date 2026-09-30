@@ -31,7 +31,9 @@ class FakeTracker:
         self.closed = True
 
 
-def test_selection_prefers_handedness_score_and_first_tie_without_identity(hand_factory):
+def test_selection_prefers_handedness_score_and_first_tie_without_identity(
+    hand_factory,
+):
     first = hand_factory("index")
     better = replace(first, handedness="Left", handedness_score=0.97)
     worse = replace(first, handedness_score=0.8)
@@ -60,7 +62,9 @@ def test_bgr_to_rgb_mirroring_preserves_source_before_overlay():
 def test_point_pinch_absence_and_keys_use_only_dry_run(hand_factory, fake_clock):
     point = hand_factory("index", aspect_ratio=4 / 3)
     tracker = FakeTracker((point,))
-    pipeline = WebcamPipeline(tracker, CursorConfig(1920, 1080, mirror_x=False), clock=fake_clock)
+    pipeline = WebcamPipeline(
+        tracker, CursorConfig(1920, 1080, mirror_x=False), clock=fake_clock
+    )
     frame = np.zeros((120, 160, 3), np.uint8)
     _, info = pipeline.process(frame)
     assert info.observation.raw is Gesture.POINT
@@ -140,7 +144,9 @@ def test_demo_releases_camera_tracker_and_windows(tmp_path, monkeypatch, failure
     monkeypatch.setattr(cv2, "waitKey", Mock(return_value=ord("q")))
     if failure:
         target = tracker if failure == "process" else cv2
-        monkeypatch.setattr(target, failure, Mock(side_effect=cv2.error("fake failure")))
+        monkeypatch.setattr(
+            target, failure, Mock(side_effect=cv2.error("fake failure"))
+        )
         with pytest.raises(cv2.error, match="fake failure"):
             run_webcam(DemoConfig(model_path=model))
     else:

@@ -1,5 +1,6 @@
 """Typed cursor intentions and an inspectable output with no device access."""
 
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
@@ -64,12 +65,18 @@ class CursorSink(Protocol):
 class DryRunCursorSink:
     """Store intentions in order without performing I/O or controlling devices.
 
-    History is unbounded; use finite demos/tests rather than a continuous loop.
+    History is unbounded by default; set max_history for continuous visual demos.
     Instances and their controllers are intended for sequential use.
     """
 
-    def __init__(self) -> None:
-        self._commands: list[CursorCommand] = []
+    def __init__(self, *, max_history: int | None = None) -> None:
+        if max_history is not None and (
+            isinstance(max_history, bool)
+            or not isinstance(max_history, int)
+            or max_history < 1
+        ):
+            raise ValueError("max_history must be a positive integer or None")
+        self._commands: deque[CursorCommand] = deque(maxlen=max_history)
 
     @property
     def commands(self) -> tuple[CursorCommand, ...]:

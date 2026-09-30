@@ -10,7 +10,7 @@ from hgi.geometry import (
     map_camera_to_screen,
     normalized_to_pixels,
 )
-from hgi.gesture_detector import Gesture, GestureDetector
+from hgi.gesture_detector import Gesture, GestureDetector, GestureObservation
 from hgi.hand_landmarks import DetectedHand, HandLandmark
 from hgi.smoothing import ExponentialSmoother
 from hgi.temporal import TemporalDecision, TemporalGestureFilter
@@ -69,6 +69,7 @@ class CursorController:
         self._smoother = ExponentialSmoother(config.smoothing_alpha)
         self._temporal = temporal if temporal is not None else TemporalGestureFilter()
         self._position: Point2D | None = None
+        self._observation: GestureObservation | None = None
         self._state = ControlState.DISABLED
 
     @property
@@ -86,6 +87,16 @@ class CursorController:
         """Return explicit opt-in state; detecting a hand never enables control."""
         return self._state
 
+    @property
+    def observation(self) -> GestureObservation | None:
+        """Last enabled update's measurements; None while disabled or reset."""
+        return self._observation
+
+    @property
+    def position(self) -> Point2D | None:
+        """Current virtual smoothed/click position; no real cursor is queried."""
+        return self._position
+
     def enable(self) -> None:
         """Opt in from neutral/unarmed state; repeated enable calls do nothing."""
         if self._state is ControlState.DISABLED:
@@ -95,6 +106,7 @@ class CursorController:
     def disable(self) -> None:
         """Disarm, cancel pending gestures and clear motion without emitting."""
         self._state = ControlState.DISABLED
+        self._observation = None
         self._temporal.reset()
         self._clear_motion()
 
@@ -143,7 +155,8 @@ class CursorController:
         try:
             command = CursorCommand(CursorAction.NONE, gesture=Gesture.UNKNOWN)
             if self._state is ControlState.ENABLED:
-                decision = self._temporal.update(self._detector.observe(hand))
+                self._observation = self._detector.observe(hand)
+                decision = self._temporal.update(self._observation)
                 command = self._command(hand, decision)
             self._sink.emit(command)
             return command

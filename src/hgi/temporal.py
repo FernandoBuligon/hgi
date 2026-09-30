@@ -42,6 +42,16 @@ class TemporalDecision:
     reset_motion: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class TemporalStatus:
+    """Read-only diagnostics at the last sample; reading never advances time."""
+
+    candidate: Gesture | None
+    stable: Gesture
+    armed: bool
+    cooldown_active: bool
+
+
 class TemporalGestureFilter:
     """Duration-based confirmation, pinch hysteresis, cooldown and tracking grace.
 
@@ -60,6 +70,16 @@ class TemporalGestureFilter:
         self._config = config if config is not None else TemporalConfig()
         self._clock = clock
         self.reset()
+
+    @property
+    def status(self) -> TemporalStatus:
+        """Snapshot using the last sampled timestamp, without reading the clock."""
+        cooldown = (
+            self._last_click is not None
+            and self._last_time is not None
+            and self._last_time < self._last_click + self._config.click_cooldown_seconds
+        )
+        return TemporalStatus(self._candidate, self._current, self._armed, cooldown)
 
     def reset(self) -> None:
         """Clear all temporal state, including cooldown, and require open rearming."""

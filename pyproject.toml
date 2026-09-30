@@ -14,12 +14,14 @@ dependencies = []
 vision = [
     "mediapipe==1.0.1",
     "numpy>=2.4,<3",
+    "opencv-contrib-python==5.0.0.93",
 ]
 dev = [
     "pytest>=8,<10",
     "pytest-cov>=7,<8",
     "ruff>=0.6,<1",
     "numpy>=2.4,<3",
+    "opencv-contrib-python==5.0.0.93",
 ]
 
 [tool.setuptools.packages.find]
