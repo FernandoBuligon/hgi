@@ -138,3 +138,18 @@ def detect_fingers(
         and spread >= config.thumb_spread_ratio
     )
     return FingerState(thumb, index, middle, ring, pinky)
+
+
+def pinch_ratio(hand: DetectedHand, config: GestureConfig | None = None) -> float:
+    """Return thumb/index tip distance divided by wrist/middle MCP distance.
+
+    Correct X for image aspect ratio, reuse HGI geometry and reject a reference
+    at or below the configured minimum. No threshold or temporal state here.
+    """
+    config = config if config is not None else GestureConfig()
+    points, reference = _hand_geometry(hand, config)
+    return normalized_distance(
+        points[HandLandmark.THUMB_TIP],
+        points[HandLandmark.INDEX_FINGER_TIP],
+        reference,
+    )
