@@ -7,8 +7,8 @@ import cv2
 import numpy as np
 import pytest
 
-from hgi.cursor import ControlState, CursorAction, CursorCommand
 from hgi.click_feedback import ClickFeedbackState
+from hgi.cursor import ControlState, CursorAction, CursorCommand
 from hgi.cursor_controller import CursorConfig
 from hgi.geometry import Point2D
 from hgi.gesture_detector import Gesture, GestureObservation
@@ -96,7 +96,9 @@ def test_invalid_overlay_frame_is_rejected(frame):
         draw_overlay(frame, state(), CursorConfig(1920, 1080))
 
 
-def test_overlay_distinguishes_recent_click_from_current_none_and_retains_total(monkeypatch):
+def test_overlay_distinguishes_recent_click_from_current_none_and_retains_total(
+    monkeypatch,
+):
     config = CursorConfig(1920, 1080)
     current = state()
     recent = replace(current, click_feedback=ClickFeedbackState(3, True))
@@ -109,7 +111,14 @@ def test_overlay_distinguishes_recent_click_from_current_none_and_retains_total(
     for _ in range(2):
         draw_overlay(frame, recent, config)
     assert recent.click_feedback.click_count == 3
-    assert any(call.args[1:3] == ((1, 1), (638, 478)) for call in rectangles.call_args_list)
+    assert any(
+        call.args[1:3] == ((1, 1), (638, 478)) for call in rectangles.call_args_list
+    )
     expired = replace(current, click_feedback=ClickFeedbackState(3, False))
     lines = "\n".join(overlay_lines(expired, config))
     assert "Last CLICK: --" in lines and "Session CLICKs: 3" in lines
+    rectangles.reset_mock()
+    draw_overlay(frame, expired, config)
+    assert not any(
+        call.args[1:3] == ((1, 1), (638, 478)) for call in rectangles.call_args_list
+    )

@@ -249,8 +249,10 @@ def test_ui_click_persistence_does_not_repeat_commands_or_advance_temporal_clock
     point = hand_factory("index", aspect_ratio=4 / 3)
     tracker = FakeTracker((point,))
     pipeline = WebcamPipeline(
-        tracker, CursorConfig(1920, 1080, mirror_x=False),
-        clock=fake_clock, ui_clock=ui_clock,
+        tracker,
+        CursorConfig(1920, 1080, mirror_x=False),
+        clock=fake_clock,
+        ui_clock=ui_clock,
     )
     frame = np.zeros((120, 160, 3), np.uint8)
     pipeline.process(frame)
@@ -268,7 +270,8 @@ def test_ui_click_persistence_does_not_repeat_commands_or_advance_temporal_clock
     assert clicked.command.action is CursorAction.CLICK
     assert clicked.click_feedback.recent_click
     assert clicked.click_feedback.click_count == 1
-    for ui_clock.now, recent in ((10.499, True), (10.5, False)):
+    for now, recent in ((10.499, True), (10.5, False)):
+        ui_clock.now = now
         _, held = pipeline.process(frame)
         assert held.command.action is CursorAction.NONE
         assert held.click_feedback.recent_click is recent
@@ -276,12 +279,25 @@ def test_ui_click_persistence_does_not_repeat_commands_or_advance_temporal_clock
         assert held.temporal == clicked.temporal  # UI time does not advance cooldown.
         assert sink.commands == (held.command,)
     actions = [call.args[0].action for call in sink.emit.call_args_list]
-    assert actions == [CursorAction.NONE, CursorAction.CLICK, CursorAction.NONE, CursorAction.NONE]
+    assert actions == [
+        CursorAction.NONE,
+        CursorAction.CLICK,
+        CursorAction.NONE,
+        CursorAction.NONE,
+    ]
     pipeline.handle_key(ord("d"))
     assert pipeline.process(frame)[1].click_feedback.click_count == 1
     pipeline.handle_key(ord("e"))
     assert pipeline.process(frame)[1].click_feedback.click_count == 1
+    assert (
+        pipeline.process(np.zeros((120, 200, 3), np.uint8))[
+            1
+        ].click_feedback.click_count
+        == 1
+    )
     pipeline.handle_key(ord("r"))
     reset = pipeline.process(frame)[1]
-    assert reset.click_feedback.click_count == 0 and not reset.click_feedback.recent_click
+    assert (
+        reset.click_feedback.click_count == 0 and not reset.click_feedback.recent_click
+    )
     assert pipeline.controller.state is ControlState.DISABLED

@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from hgi.camera import validate_bgr_frame
+from hgi.click_feedback import ClickFeedbackState
 from hgi.cursor import ControlState, CursorCommand
 from hgi.cursor_controller import CursorConfig
 from hgi.geometry import Point2D, map_camera_to_screen, normalized_to_pixels
@@ -76,6 +77,7 @@ class OverlayState:
     position: Point2D | None
     temporal: TemporalStatus
     fps: float = 0.0
+    click_feedback: ClickFeedbackState = ClickFeedbackState()
 
 
 def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
@@ -96,6 +98,8 @@ def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
         f"candidate: {candidate} | armed: {'yes' if temporal.armed else 'no'} | "
         f"cooldown: {'active' if temporal.cooldown_active else 'inactive'}",
         f"Pinch: {pinch} | Cursor: {cursor} | Action: {state.command.action.value}",
+        f"Last CLICK: {'RECENT' if state.click_feedback.recent_click else '--'} | "
+        f"Session CLICKs: {state.click_feedback.click_count}",
         f"FPS: {state.fps:.1f} | "
         f"Logical screen: {config.screen_width}x{config.screen_height}",
     )
@@ -180,7 +184,8 @@ def draw_overlay(
     """Annotate a BGR frame in place, using actual dimensions; never resize it.
 
     Index screen target is unsmoothed. Cursor is the retained virtual output,
-    which may be frozen on PINCH or during short loss. CLICK is a frame event.
+    which may be frozen on PINCH or during short loss. Action is the current
+    frame event; click_feedback is UI persistence and never repeats an action.
     """
     validate_bgr_frame(frame)
     height, width = frame.shape[:2]
@@ -197,4 +202,6 @@ def draw_overlay(
     _text(
         frame, "E enable | D disable | R reset | Q / Esc quit", (8, height - 10), scale
     )
+    if state.click_feedback.recent_click:
+        cv2.rectangle(frame, (1, 1), (width - 2, height - 2), _YELLOW, 3)
     return frame

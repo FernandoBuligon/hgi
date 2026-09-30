@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from hgi.camera import Camera, validate_bgr_frame
+from hgi.click_feedback import ClickFeedback
 from hgi.cursor import DryRunCursorSink
 from hgi.cursor_controller import CursorConfig, CursorController
 from hgi.finger_state import GestureConfig
@@ -91,12 +92,14 @@ class WebcamPipeline:
         config: CursorConfig,
         *,
         clock: Callable[[], float] = monotonic,
+        ui_clock: Callable[[], float] = monotonic,
     ) -> None:
         if config.mirror_x:
             raise ValueError("Mirrored demo input requires CursorConfig mirror_x=False")
         self._tracker = tracker
         self._config = config
         self._clock = clock
+        self._click_feedback = ClickFeedback(clock=ui_clock)
         self._shape: tuple[int, int] | None = None
         self._sink = DryRunCursorSink(max_history=1)
         self._configure(1.0)
@@ -146,12 +149,20 @@ class WebcamPipeline:
                 self._controller.position,
                 self._temporal.status,
                 fps,
+                self._click_feedback.update(command.action),
             )
             return draw_overlay(bgr, state, self._config), state
         except Exception:
             # Cleanup only; do not turn broken inference into a missing hand.
             self._controller.disable()
             raise
+
+    def handle_key(self, key: int) -> bool:
+        """Handle demo keys; R also resets UI count/feedback, D/E preserve them."""
+        quit_requested = handle_key(key, self._controller)
+        if key & 0xFF in (ord("r"), ord("R")):
+            self._click_feedback.reset()
+        return quit_requested
 
 
 def handle_key(key: int, controller: CursorController) -> bool:
@@ -206,7 +217,7 @@ def run_webcam(config: DemoConfig) -> None:
                 fps = 1.0 / elapsed if elapsed > 0 else 0.0
                 previous = now
                 cv2.imshow(WINDOW_NAME, frame)
-                if handle_key(cv2.waitKey(1), pipeline.controller):
+                if pipeline.handle_key(cv2.waitKey(1)):
                     break
                 if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                     break
