@@ -113,3 +113,19 @@ def test_absence_and_repeated_calls_have_no_temporal_state(
         detector.detect(replace(point, handedness="Left", handedness_score=0.1))
         is Gesture.POINT
     )
+
+
+def test_observation_keeps_raw_label_pose_and_ratio_for_hysteresis(hand_factory):
+    detector = GestureDetector()
+    hand = with_pinch(hand_factory("index"), gap=0)
+    observation = detector.observe(hand)
+    assert observation.raw is Gesture.PINCH
+    assert observation.pose is Gesture.POINT
+    assert observation.pinch_ratio == 0.0
+    assert detector.detect(hand) is observation.raw
+
+
+def test_absent_observation_does_not_invent_a_pinch_measurement() -> None:
+    observation = GestureDetector().observe(None)
+    assert observation.raw is observation.pose is Gesture.UNKNOWN
+    assert observation.pinch_ratio is None
