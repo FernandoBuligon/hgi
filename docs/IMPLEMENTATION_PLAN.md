@@ -1207,3 +1207,53 @@ visual será injetável separadamente do temporal. Nenhum timer/thread/históric
 de comandos novo. Sessão visual começa na abertura da demo; R limpa contador
 e feedback, D/E e mudanças de resolução preservam o total. Desenhar repetidamente
 um snapshot não contabiliza outra intenção. Fase 8 permanece fora do escopo.
+
+Implementado: `click_feedback.py` puro de UI, contador/timestamp e snapshot
+imutável; overlay exibe Last CLICK: RECENT e borda amarela durante 500 ms,
+Session CLICKs sempre visível. Action continua sendo exatamente o comando atual.
+WebcamPipeline recebe ui_clock independente e alimenta feedback somente com
+command.action, uma vez por atualização emitida. R limpa a UI, D/E preservam
+o contador. Não foram modificados cursor.py, cursor_controller.py, temporal.py,
+dependências ou qualquer threshold. Nenhum CLICK é recriado/reemitido/retido pela UI.
+
+Arquivos criados: src/hgi/click_feedback.py, tests/test_click_feedback.py.
+Modificados: overlay.py, webcam.py, testes de overlay/webcam, README, arquitetura
+e este plano. Base limpa dbd5aaf, branch mais. ECC: planejamento inline/TDD,
+python-reviewer, security-review e verification-loop; nenhuma API externa nova
+exigiu documentation-lookup adicional.
+
+| Garantia | Evidência determinística |
+|---|---|
+| Início sem cliques, MOVE/NONE não contam | test_click_feedback.py com fake_clock |
+| Indicação antes de 500 ms, expiração no limite, total preservado | Mesmo arquivo, sem sleep |
+| Novo CLICK conta uma vez e reinicia deadline visual | Mesmo arquivo, sem gate de ações na UI |
+| Reset, sessões independentes e snapshots imutáveis | Mesmo arquivo |
+| Command NONE com RECENT visível, total mantido e borda removida ao expirar | test_overlay.py, OpenCV sobre frame sintético; desenho repetido não conta |
+| UI avança/expira sem alterar relógio/status temporal; nenhum CLICK extra no sink | test_webcam.py: emissões exatas NONE/CLICK/NONE/NONE, clocks separados |
+| D/E preservam total, mudança de resolução preserva, R limpa/desabilita | Mesmo teste integrado com detector/filtro/controller reais |
+
+RED real: testes de feedback/overlay tiveram 2 erros de coleta pela ausência
+de hgi.click_feedback; teste integrado falhou em runtime por ui_clock ausente.
+Checkpoint `431420c`. GREEN: 33 testes focados e 360 testes na suíte completa
+(6 novos), checkpoint `0d4205e`. Commits locais, sem squash/push/publicação.
+
+Verificações executadas com Python 3.11.16 do Conda hgi:
+
+- `python -m pytest -q`: **360 PASS**, sem skips/falhas.
+- `python -m pytest --cov=hgi --cov-report=term-missing`: **99% total**;
+  click_feedback **100%**, overlay **100%**, webcam **97%**; 842 instruções,
+  9 ausentes, 210 branches, 5 parciais.
+- `python -m ruff check .` e `python -m ruff format --check .`: PASS.
+- `python -m compileall src`, `python -m pip check`, `git diff --check`: PASS.
+- Revisão Python: interfaces tipadas, estado mínimo, snapshots imutáveis,
+  funções pequenas e reutilização das fronteiras; sem CRITICAL/HIGH pendente.
+- Revisão de segurança limitada via AST/diff: sem nova automação, captura,
+  gravação/transmissão, comandos externos ou acesso sensível. Nenhuma alteração
+  em controller/filtro/sink/dependências. Tipos revistos manualmente, sem alegar
+  execução de Mypy/Pyright/Bandit.
+
+Não foi repetido smoke de webcam pelo agente neste ajuste. O relato do usuário
+motivou a correção, mas não fornece FPS/latência nem aceite integral do smoke.
+Limitação: a UI amostra o tempo por frame; loop bloqueado deixa a última imagem
+parada até a próxima atualização. Próximo passo: confirmar legibilidade durante
+o smoke manual da Fase 7. Fase 8 e ações reais continuam fora do escopo.

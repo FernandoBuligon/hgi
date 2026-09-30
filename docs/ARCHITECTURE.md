@@ -560,7 +560,28 @@ virtual, Action e FPS. São 21 pontos com conexões, destaque do indicador e
 feedback amarelo de PINCH. `Index normalized` descreve o indicador atual;
 `screen target` é mapeado sem EMA, `Cursor` é a posição retida pelo controller.
 Textos possuem fundo escuro para contraste, região ativa indica toda a tela
-lógica e rodapé informa controles locais. CLICK é mostrado no frame do evento.
+lógica e rodapé informa controles locais. Action é o comando do frame atual.
+Last CLICK: RECENT e borda amarela confirmam a última intenção por 500 ms;
+Session CLICKs mostra o contador da sessão visual.
+
+`click_feedback.py` pertence à observabilidade: ClickFeedback recebe apenas
+CursorAction uma vez após cada update/emit bem-sucedido do controller. Mantém
+somente contador e timestamp do último CLICK, sem CursorCommand, posição,
+referência ao sink ou permissão de ação. Um novo CLICK incrementa o total e
+reinicia a janela visual; MOVE/NONE somente atualizam visibilidade. Não há
+debounce/cooldown da UI e ela não decide se uma intenção deve ser autorizada.
+ClickFeedbackState é um snapshot imutável com click_count/recent_click.
+Desenhar o mesmo snapshot repetidamente não altera estado nem conta cliques.
+
+WebcamPipeline injeta `ui_clock` no feedback separadamente do `clock` usado pelo
+filtro temporal. Ambos usam monotonic por padrão; testes controlam cada relógio
+independentemente. A indicação expira na primeira amostra da UI em/apos
+last_click_at + 0.5 s, sem thread/timer/sleep. Se o loop parar, a imagem permanece
+estática até a próxima amostra; a duração percebida depende da taxa de frames.
+O total é da abertura da demo ou último R. WebcamPipeline.handle_key delega
+os controles já existentes e limpa feedback/contador somente em R; D/E e
+mudança de resolução preservam o total. CursorController/TemporalGestureFilter,
+debounce, histerese, cooldown, emissão e retenção do sink não foram alterados.
 
 run_webcam valida modelo e sessão gráfica antes da captura. Context managers
 liberam câmera/tracker sob falhas; finally desabilita e destrói janelas. Erros

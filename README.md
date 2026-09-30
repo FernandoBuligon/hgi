@@ -84,7 +84,7 @@ a sessão é reiniciada DISABLED; habilite novamente com E.
 |---|---|
 | E | Habilita apenas intenções virtuais |
 | D | Desabilita e limpa a interação |
-| R | Reset, permanecendo DISABLED |
+| R | Reset da interação e contador visual, permanecendo DISABLED |
 | Q / Esc | Encerra e libera câmera, tracker e janelas |
 
 Também é possível fechar a janela. A sessão começa **DISABLED**; nenhuma mão
@@ -99,7 +99,12 @@ armamento/cooldown, razão de pinça, cursor virtual/ação e FPS. Desenha os 21
 landmarks com conexões, realça o indicador e marca a região ativa de 10% a 90%.
 `Index normalized` é a posição no frame espelhado; `screen target` é o alvo
 mapeado antes da suavização; `Cursor` é a posição virtual retida pelo controller.
-CLICK aparece somente no frame do evento. FPS é a frequência do loop, mostrada
+`Action` mostra somente o comando do frame atual. `Last CLICK: RECENT` e uma
+borda amarela permanecem por 500 ms após uma intenção CLICK. `Session CLICKs`
+conta as intenções desde a abertura da demo ou o último R; D/E preservam o total.
+Essa memória é somente visual: guarda contador/timestamp, sem reemitir ou reter
+um comando CLICK. O relógio da UI é separado dos gates de gesto/cooldown.
+FPS é a frequência do loop, mostrada
 com uma amostra de atraso; não é uma medição isolada de latência do modelo.
 
 O frame é espelhado **antes** da inferência; o controller usa `mirror_x=False`.
@@ -125,7 +130,7 @@ Falhas de captura/inferência/desenho encerram com limpeza; geometria degenerada
 gera erro explícito, em vez de inventar um gesto. Q/Esc são processados entre
 frames; captura ou inferência nativa bloqueada pode atrasar a resposta.
 
-Validação automatizada: **354 testes**, **99% de cobertura total**, Ruff check e
+Validação automatizada: **360 testes**, **99% de cobertura total**, Ruff check e
 format aprovados. Testes de câmera/janela usam fakes; o overlay usa OpenCV real
 sobre arrays sintéticos sem display. POINT/PINCH foram validados sinteticamente.
 FPS real, lateralidade, ergonomia, jitter e qualidade de detecção humana ainda
