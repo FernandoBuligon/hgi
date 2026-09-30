@@ -213,6 +213,6 @@ def test_failed_output_disables_and_preserves_original_error(hand_factory, fake_
     assert controller.update(point).action is CursorAction.NONE
 
 
-def test_only_dry_run_output_is_accepted_in_this_phase() -> None:
-    with pytest.raises(TypeError, match="DryRunCursorSink"):
+def test_output_requires_a_callable_cursor_sink_boundary() -> None:
+    with pytest.raises(TypeError, match="CursorSink"):
         CursorController(CursorConfig(1001, 501), sink=object())

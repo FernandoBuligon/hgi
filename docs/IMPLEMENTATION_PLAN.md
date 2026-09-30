@@ -1256,4 +1256,40 @@ Não foi repetido smoke de webcam pelo agente neste ajuste. O relato do usuário
 motivou a correção, mas não fornece FPS/latência nem aceite integral do smoke.
 Limitação: a UI amostra o tempo por frame; loop bloqueado deixa a última imagem
 parada até a próxima atualização. Próximo passo: confirmar legibilidade durante
-o smoke manual da Fase 7. Fase 8 e ações reais continuam fora do escopo.
+o smoke manual da Fase 7. Fase 8 e ações reais continuavam fora do escopo nesse ajuste.
+
+## 16. Fase 8 — backend real com duplo opt-in
+
+Pedido explícito do usuário autoriza somente backend real de cursor; substitui
+volume/extras da proposta original. Base limpa b615a22, branch mais. Documentos
+AGENTS/plano/arquitetura e módulos cursor/controller/temporal/webcam/overlay lidos
+integralmente antes do código. Pipeline visual e gates temporais preservados.
+
+Plano curto: TDD do adaptador/sink real com backend falso; aceitar CursorSink no
+controller sem importar automação; TDD de seleção por flag, resolução e modo
+visual; integrar mantendo DISABLED inicial e E/D/R/Q/Esc; revisar Python e
+segurança, verificar suíte/cobertura/lint/build/requisitos e documentar. Commits
+RED/GREEN locais, sem push. ECC: planejamento inline (execução já autorizada),
+tdd-workflow, documentation-lookup, python-reviewer, security-review e
+verification-loop. Context7 não exposto; fontes oficiais PyAutoGUI consultadas.
+
+Padrões: CursorSink/command imutável, cleanup+raise do controller, configuração
+validada pela geometria existente, fake_clock/hand_factory e fakes somente nas
+fronteiras. PyAutoGUI ficará apenas em real_cursor.py, com import tardio. Um erro
+de MOVE/CLICK trava esse sink até reconstrução; não há retry/replay. CLICK usa
+o alvo do comando em uma única chamada de clique primário. Conversão round na
+fronteira e rejeição de coordenadas inválidas, sem novo clipping/smoothing.
+
+Resolução: dry-run mantém 1920×1080; real consulta backend uma vez. Overrides
+exigem ambos os argumentos e não podem exceder o tamanho detectado; representam
+um retângulo com origem (0,0). Não há suporte avançado a múltiplos monitores.
+Modo visual será derivado do sink escolhido. PAUSE 0.1 será preservada: pode
+limitar atualizações com MOVE a cerca de 10 Hz, antes do custo de visão.
+
+Inspeção prévia: Python Conda hgi 3.11.16, PyAutoGUI 0.9.54, sessão X11,
+DISPLAY=:0, sem WAYLAND_DISPLAY. Consulta de tela inicialmente bloqueada pelo
+sandbox; repetida com autorização de acesso ao display, somente leitura:
+4480×1440, FAILSAFE=True, PAUSE=0.1. Nenhum input gerado na consulta.
+`ls -l /dev/video*`: nenhum dispositivo. Smoke humano A–D e FPS/latência
+permanecem pendentes; consulta bem-sucedida não comprova movimento/clique.
+Wayland será rejeitado explicitamente no backend real, sem contorno de permissões.

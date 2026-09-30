@@ -3,11 +3,18 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from math import cos, radians, sin
+import sys
 from typing import Literal
 
 import pytest
 
 from hgi.hand_landmarks import DetectedHand, HandLandmark, NormalizedLandmark
+
+
+@pytest.fixture(autouse=True)
+def block_real_mouse_backend(monkeypatch):
+    """Never load real PyAutoGUI in pytest; adapter tests may inject a fake."""
+    monkeypatch.setitem(sys.modules, "pyautogui", None)
 
 
 @dataclass
