@@ -130,9 +130,9 @@ def detect_fingers(
     )
     index_base = points[HandLandmark.INDEX_FINGER_MCP]
     spread = (
-        distance(points[HandLandmark.THUMB_TIP], index_base)
-        - distance(points[HandLandmark.THUMB_IP], index_base)
-    ) / reference
+        normalized_distance(points[HandLandmark.THUMB_TIP], index_base, reference)
+        - normalized_distance(points[HandLandmark.THUMB_IP], index_base, reference)
+    )
     thumb = (
         _straightness(points, thumb_chain, config) >= config.extension_ratio
         and spread >= config.thumb_spread_ratio
