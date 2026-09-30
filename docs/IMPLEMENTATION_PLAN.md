@@ -7,9 +7,10 @@ de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente as **Fases 1 a 4**, registradas nas seções 9 a 12, e agora somente
-a **Fase 5 — cursor virtual em dry-run**, com evidências na seção 13.
-As fases 6–10 continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
+posteriormente as **Fases 1 a 5**, registradas nas seções 9 a 13, e agora somente
+a **Fase 6 — proteção temporal e opt-in lógico em dry-run**, com evidências na seção 14.
+O usuário adiou explicitamente mouse real/PyAutoGUI. As fases 7–10 continuam
+propostas, sem autorização. Na Fase 3, o modelo foi adquirido
 explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
 automação, gravação de frames ou publicação.
 
@@ -52,7 +53,8 @@ flowchart LR
     B --> C[HandTracker: MediaPipe]
     C --> D[Landmarks e handedness]
     D --> E[GestureDetector]
-    E --> F[CursorController: mapeamento e smoothing]
+    E --> T[TemporalGestureFilter: confirmação e gates]
+    T --> F[CursorController: opt-in, mapeamento e smoothing]
     F --> J[CursorCommand]
     J --> G[DryRunCursorSink ou futuro backend opt-in]
     B --> H[Overlay]
@@ -71,11 +73,12 @@ flowchart LR
 | `geometry.py` | Distâncias, normalização por escala, mapeamento e clipping |
 | `hand_tracker.py` | Adaptar frames e resultados MediaPipe; nunca executar ações |
 | `finger_state.py` | Configuração imutável, dedos nomeados e medidas geométricas da mão |
-| `gesture_detector.py` | POINT/PINCH/OPEN_HAND/FIST/UNKNOWN por chamada; temporalidade adiada |
+| `gesture_detector.py` | Rótulo bruto, pose dos dedos e razão de pinça por chamada; stateless |
+| `temporal.py` | Duração de estabilização, histerese, rearmamento, cooldown e grace period com clock injetável |
 | `smoothing.py` | Média exponencial e reset, sem dependência de hardware |
 | `cursor.py` | Intenções tipadas MOVE/CLICK/NONE, Protocol de saída e sink dry-run em memória |
-| `cursor_controller.py` | Configuração imutável, alvo virtual, mapeamento, EMA e transição lógica de pinça |
-| `action_controller.py` | Futuro backend real, proteção temporal e cooldown; sem implementação nesta fase |
+| `cursor_controller.py` | Opt-in explícito, configuração imutável, alvo virtual, mapeamento e EMA |
+| `action_controller.py` | Futuro backend real e fail-safe; exige autorização própria; proteção temporal já isolada |
 | `overlay.py` | Landmarks, mão, gesto, modo, alvo virtual e feedback de pinça |
 
 Os módulos implementados na Fase 2 e seus contratos estão em
@@ -116,12 +119,15 @@ Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfi
   virtuais explícitas, sem depender do PyAutoGUI.
 - Aplicar `previous + alpha * (current - previous)`, com `0 < alpha <= 1`;
   primeiro ponto inicializa o filtro. Resetar na perda de tracking/inatividade.
-- MOVE exige POINT: somente indicador estendido e ausência de pinça. Pinça
-  tem prioridade. Na futura camada temporal, usar thresholds `close < open`, confirmação de
-  frames e relógio monotônico; emitir clique somente em OPEN → PINCHED confirmado.
+- MOVE exige POINT estável, somente indicador estendido e ausência de pinça.
+  A Fase 6 adotou confirmação por duração (80 ms), thresholds 0.25 < 0.32,
+  cooldown de 300 ms e relógio injetável; nenhum contador de frames adicional.
 - Pinça mantida não repete clique; gesto descartado por cooldown não é enfileirado.
-  Após perda/troca de mão, bloquear cliques até abertura confirmada e iniciar
-  novamente o smoothing, evitando cliques e saltos na reaquisição.
+  Após perda longa (150 ms desde a primeira ausência), bloquear cliques até
+  abertura confirmada e reiniciar smoothing. Ausência breve preserva interação.
+  Troca de mão sem ausência exige reset explícito; não há identificação persistente.
+- Começar DISABLED. enable permite somente intenções virtuais; disable/reset
+  limpam a sessão e não emitem comandos. Erros desabilitam e propagam a causa.
 - Manter `FAILSAFE` e pausas de segurança. Fail-safe ou erro conhecido do backend
   desarma controle e mantém detecção em dry-run, com aviso; não rearmar sozinho.
   Erros inesperados encerram com limpeza, sem `except` genérico que os esconda.
@@ -132,6 +138,9 @@ Ordem: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → gate da 8 → 9 → 10*
 A Fase 8 é adiada durante a entrega do MVP; só poderá iniciar depois da Fase 10
 e dos testes manuais obrigatórios. Documentação acompanha cada fase, além do
 fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendente.
+O backend real originalmente previsto na Fase 6 foi adiado pelo pedido atual;
+exigirá um incremento com autorização e plano próprios antes do aceite final
+do MVP. A Fase 7 proposta não autoriza automação implicitamente.
 
 | Fase | Incremento e arquivos principais | Testes e verificações | Hardware e critério de aceite |
 |---|---|---|---|
@@ -141,7 +150,7 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 | 3 — adaptador HandTracker | `hand_tracker.py`, `hand_landmarks.py`; modelo local documentado, sem loop de captura/overlay | TDD: conversão, handedness, nenhuma mão, 21 pontos, frame RGB, configuração, erros e limpeza; smoke com modelo real e arrays sintéticos | Concluída no escopo atualizado pelo usuário, conforme seção 11. Sem webcam/GUI obrigatórias; tracking humano e diagnóstico visual manual permanecem pendentes |
 | 4 — dedos e gestos | `finger_state.py`, `gesture_detector.py`; somente interpretação por mão | Fixtures sintéticas: estados nomeados, Left/Right, rotações, proporção, pinça/escalas/limite inclusivo, degenerações, prioridade e ausência; sem temporalidade | Concluída no escopo atualizado pelo usuário, seção 12. Nenhum hardware; calibração e validação visual permanecem pendentes |
 | 5 — cursor virtual | `cursor.py`, `cursor_controller.py`, comandos em memória e demo sintética; sem overlay ou captura | `test_cursor.py`, `test_cursor_controller.py`: dados/sink, centro, clipping, região, espelhamento, resoluções, EMA, reset, inatividade e clique lógico por transição | Concluída no escopo atualizado pelo usuário, seção 13. Sem hardware; alvo limitado e suave, saída inspecionável; ergonomia visual pendente |
-| 6 — mouse opt-in | Backend PyAutoGUI, `--control`, clique e cooldown | Backend falso/spy e relógio injetado: clique único mantido por muitos frames, reabertura/novo clique, cooldown antes/no limite/depois, evento descartado, perda/reaquisição, backend indisponível, fail-safe e nenhuma reativação automática | Webcam, display e permissões. Manual: MOVE, pinça única, novo clique após abertura, parada pelo fail-safe e q/Esc; fallback seguro verificável |
+| 6 — temporal e opt-in lógico | `temporal.py`, observações do detector e gates do CursorController; somente sink dry-run | Clock falso: confirmação, histerese, rearmamento, cooldown inclusivo/sem fila, perda curta/longa, enable/disable/reset e falhas que desabilitam | Concluída no escopo atualizado pelo usuário, seção 14. Sem hardware/automação; backend real e fail-safe ainda pendentes |
 | 7 — overlay e ergonomia | Completar `overlay.py`, informações do modo/gesto/mão | Testar dados apresentados e modo efetivo após fallback com mocks; manual para legibilidade, feedback de pinça e instruções | Webcam/GUI. Uma pessoa entende o modo e a ação; sem excesso de métricas. FPS permanece opcional posterior |
 | 8 — gate de extras | Volume/mídia e demais extras adiados | Nenhum teste ou código de extras durante o MVP; futura fase precisará de plano próprio e testes de backend degradável | Aceite do MVP é pré-requisito; indisponibilidade de mídia não poderá afetar mouse/detecção |
 | 9 — documentação | README completo, arquitetura, testes, licença, assets, plano atualizado e instruções de demo | Reproduzir instalação em ambiente isolado e comandos do README; revisar links, gestos, matemática, histerese, segurança e limites por SO | Instalação sem câmera; execução completa exige hardware. Outra pessoa consegue instalar/executar seguindo só o README |
@@ -229,8 +238,8 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após a Fase 5 autorizada,
-a próxima fase proposta é **Fase 6 — controle opt-in e proteção temporal**, que aguardará
+O aceite da Fase 0 foi restrito ao documento. Após a Fase 6 autorizada,
+a próxima fase proposta é **Fase 7 — integração visual/overlay em dry-run**, que aguardará
 instrução do usuário. A validação visual do tracker ainda exige câmera e escopo
 de integração de captura apropriado. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
@@ -659,7 +668,8 @@ futuros; nenhum controle real do computador foi habilitado.
 
 ## 13. Evidências da Fase 5 — cursor virtual em dry-run
 
-**Estado: concluída somente a camada lógica autorizada. A Fase 6 não foi iniciada.**
+**Estado: concluída somente a camada lógica autorizada.** Ao encerrar a Fase 5,
+a Fase 6 não estava iniciada; sua execução posterior está na seção 14.
 O pedido desta fase substitui o overlay/webcam da proposta inicial por comandos
 inspecionáveis e demo sintética. Não houve controle real, consulta ao monitor,
 captura, loop de frames, relógio, cooldown ou dependência nova. Inspeção iniciada
@@ -787,3 +797,157 @@ dependências; não participa desta fase puramente Python. Nenhum teste de hardw
 foi necessário ou realizado. Próxima fase recomendada: **Fase 6 — controle
 opt-in e proteção temporal**, somente após nova autorização, preservando dry-run
 e adicionando os gates ausentes antes de habilitar qualquer efeito real.
+
+## 14. Evidências da Fase 6 — proteção temporal e opt-in lógico
+
+**Estado: concluída somente a fase autorizada. Fase 7 e mouse real não iniciados.**
+O pedido atual substitui o backend PyAutoGUI da proposta original por uma camada
+temporal síncrona, testável e exclusivamente dry-run. Leitura integral de
+AGENTS.md, plano, arquitetura, cursor.py, cursor_controller.py, gesture_detector.py
+e smoothing.py antes das alterações. Base Git limpa: `d3efb4e`, branch `mais`.
+Fechamento em 30/09/2026. ECC aplicado: planejamento, tdd-workflow,
+python-reviewer, security-review e verification-loop. Nenhuma dependência alterada.
+
+### Arquivos e arquitetura
+
+Criados: `src/hgi/temporal.py`, `tests/test_temporal.py`, `tests/test_cursor_session.py`.
+Modificados: cursor.py, cursor_controller.py, gesture_detector.py, testes de
+cursor/detector e conftest.py, scripts/demo_cursor.py, README, ARCHITECTURE.md
+e este plano. AGENTS.md, geometria, smoothing, tracker, tipos de mão e manifestos
+preservados. Não existe action_controller.py/backend real, CLI de controle ou GUI.
+
+Fluxo: DetectedHand → GestureDetector.observe → GestureObservation →
+TemporalGestureFilter → TemporalDecision → CursorController → CursorCommand →
+DryRunCursorSink. O controller chama as duas dependências, mantendo somente
+opt-in/posição/EMA; toda a lógica de tempo está isolada em temporal.py.
+
+GestureObservation imutável preserva raw, pose sem PINCH e pinch_ratio; None no
+ratio indica mão ausente. Medidas calculadas uma vez, reutilizando a geometria
+existente. detect(hand) continua retornando o mesmo rótulo bruto. Isso evita
+recalcular razões ou tentar extrair a pose de um rótulo que já virou PINCH.
+TemporalDecision imutável expõe gesture estável, move, click e reset_motion.
+Não há event bus ou infraestrutura adicional.
+
+### Decisões e mudanças de contrato
+
+- Estratégia única: **duração**, padrão **80 ms**. Troca de candidato reinicia
+  confirmação; o gesto estável anterior persiste até a nova confirmação.
+  UNKNOWN breve durante POINT preserva o movimento/EMA. PINCH em fechamento
+  congela MOVE imediatamente, mesmo antes de se tornar estável.
+- Histerese: entra em ratio **≤0.25**, sai em ratio **≥0.32**, conserva latch
+  no intervalo intermediário. Parâmetros finitos/não negativos, sem bool;
+  exige enter < exit. TemporalConfig governa esses limiares, independentemente
+  do threshold que GestureConfig usa para o rótulo raw.
+- Clique exige abertura em ratio ≥exit por 80 ms e estado não-PINCH; entrada
+  confirmada consome armamento. PINCH mantido não repete. Cooldown padrão
+  **300 ms**, com borda inclusiva. Evento bloqueado é descartado, nunca enfileirado;
+  somente nova abertura/entrada válidas podem produzir outro CLICK.
+- Clock Callable[[], float] injetado no filtro, monotonic como default de borda;
+  uma leitura por update, sem clock no controller. Segundos finitos e não
+  decrescentes; relógio inválido/regressivo gera erro e limpa a interação.
+  Comparação por deadlines start+duration, sem sleep/timers/threads.
+- Tracking: grace de **150 ms desde a primeira ausência**. Ausência curta
+  emite NONE, conserva gesto/latch/armamento/EMA, mas cancela confirmação
+  pendente. Tempo ausente não confirma PINCH ou abertura.
+- Ausência longa limpa interação, solicita reset de EMA/posição e exige
+  abertura nova; preserva último clique para não contornar cooldown. A recuperação
+  verifica expiração mesmo sem chamadas intermediárias. Opt-in permanece ENABLED,
+  porém sem intenção pendente e com movimento sujeito à confirmação nova.
+- ControlState começa DISABLED. enable() é explícito e idempotente; uma
+  sessão nova começa neutra/desarmada. disable()/controller.reset() desabilitam
+  e limpam tempo/cooldown/EMA/posição sem emitir comandos ou apagar o histórico.
+  Re-enable não conserva confirmação nem clique pendente.
+- update(hand) e a representação CursorCommand foram preservados, mas agora
+  nenhuma entrada gera MOVE/CLICK antes de enable e confirmação. O sink aceito
+  é exclusivamente DryRunCursorSink, não um backend arbitrário. Qualquer exceção
+  de processamento/saída desabilita e propaga a original, sem retry/supressão.
+- Os testes de geometria da Fase 5 passaram a dar enable e a injetar durações
+  zero/clock fixo. Suas verificações de mapeamento/EMA foram mantidas. Contratos
+  antigos de rearmamento por perda/reset foram substituídos por abertura obrigatória
+  e disable. Injeção do detector preserva configuração geométrica; histerese
+  agora pertence ao filtro, não ao limiar bruto do detector.
+
+### TDD, checkpoints e garantias
+
+| Incremento | Comando do ciclo | RED real | GREEN real | Checkpoints |
+|---|---|---|---|---|
+| Observações sem perder pose/ratio | `python -m pytest -q tests/test_gesture_detector.py` | 2 falharam, 15 passaram; observe ausente | 17 passaram | `cbcd8cd` → `d423a31` |
+| Proteções temporais | `python -m pytest -q tests/test_temporal.py` | 1 erro de coleta: hgi.temporal ausente | 27 passaram; 29 após ampliar garantias de configuração/clock | `e715c76` → `5bc07d1` |
+| Opt-in e falhas seguras | `python -m pytest -q tests/test_cursor_session.py` | 13 falharam; state/temporal ausentes e sink sem restrição | 13 passaram | `4dc0f40` → `b670b6e` |
+| Compatibilidade e demo | `python -m pytest -q`, Ruff e demo temporal | Adaptação explícita à semântica nova, sem redefinir matemática | 306 passaram e demo confirmou os gates | `6b7c566` |
+
+Não houve mocks de geometria/detecção/filtro. Testes temporais usam observações
+reais tipadas e clock falso; integração usa mãos sintéticas e componentes HGI
+reais. Apenas o sink de teste que lança erro representa uma falha na fronteira
+de saída. Não houve sleep, teste desativado, squash ou push.
+
+| Garantia | Teste/arquivo | Evidência |
+|---|---|---|
+| Medidas preservadas, ausência normal e detect compatível | test_gesture_detector.py | 17 PASS |
+| Confirmação mínima, candidato reiniciado e UNKNOWN breve | test_temporal.py / test_cursor_session.py | PASS com segundos falsos |
+| Fechamento/abertura inclusivos, faixa intermediária e release confirmado | Testes de histerese/rearmamento | PASS |
+| Thresholds personalizados usam ratio, sem depender do rótulo raw | test_custom_hysteresis_uses_measurement_instead_of_the_raw_label | PASS |
+| CLICK único, cooldown antes/no limite e nenhuma fila | Testes de confirmação/cooldown | PASS |
+| Inicialização/reset/reaquisição fechada não clicam sem abertura | Testes de armamento e tracking | PASS |
+| Tracking curto preserva EMA e PINCH, longo limpa sem contornar cooldown | Testes temporais e de sessão | PASS |
+| Ausência cancela candidatos; recuperação verifica timeout | Testes de tracking | PASS |
+| DISABLED não move/clica; enable explícito, disable/reset/re-enable neutros | test_cursor_session.py | PASS |
+| Clock inválido/regressivo, input inválido e saída com erro ficam seguros | Testes de falha/configuração | PASS; erros propagados |
+| Uma leitura de clock por update | test_one_clock_read_per_temporal_update | PASS |
+| Geometria/EMA da Fase 5 continuam verificadas | test_cursor_controller.py | 31 PASS adaptados |
+
+Total novo: **44 testes**, 2 de observação, 29 temporais e 13 de sessão.
+Durante a integração, uma comparação de prazo mostrou que 0.4+0.08 tem
+representação ligeiramente acima de 0.48; o clock falso passou a avançar pela
+duração exata, sem tolerância artificial no filtro. Uma edição de expectativa
+de rearmamento foi corrigida. Ruff corrigiu a ordenação de import dos helpers.
+Nenhum problema foi escondido ou regra de lint desativada.
+
+### Verification-loop e revisões
+
+| Verificação executada | Resultado |
+|---|---|
+| `python -m pytest -q` | 306 passaram; 44 novos; sem skips |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 99% total; 541 instruções, 2 ausentes; 146 branches, 1 parcial |
+| Cobertura de temporal.py | 99%; 115 instruções/38 branches; defesa de pose inválida não exercitada |
+| Cobertura de cursor_controller.py / cursor.py | 100% cada; 83/42 instruções e 18/12 branches |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS; 30 arquivos Python formatados |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | Nenhum requisito quebrado; aviso do cache pip no sandbox sem falha |
+| `python scripts/demo_cursor.py` | DISABLED→NONE; enable; POINT confirmado→MOVE; PINCH→CLICK único; cooldown→NONE sem fila; nova abertura/entrada→CLICK; disable→NONE |
+| Demo via python -I -S -B sem site-packages | PASS com imports de visão/automação bloqueados e audit hook para rede/processos/ctypes |
+| python-reviewer, tipos/AST/diff | Interfaces tipadas, funções do pacote ≤31 linhas (demo ≤48), dados imutáveis, responsabilidades separadas e falhas propagadas; sem CRITICAL/HIGH pendente |
+| security-review, imports transitivos e scan limitado | Clock somente na borda temporal, sem automação/captura/segredos/execução dinâmica; todas as exceções capturadas relançadas |
+| Diff/whitespace e documentos | Escopo da Fase 6; AGENTS.md preservado |
+| Wheel offline com --no-deps --no-build-isolation --no-index em /tmp/hgi-phase6-wheels | PASS; temporal incluído, nenhum modelo/dependência instalado |
+| `python -m hgi` e links locais da documentação | PASS; identificação preservada e destinos existentes |
+
+Mypy/Pyright/Bandit continuam ausentes; revisão de tipos manual, sem alegar
+checagem estática dedicada. O getter detector.config e a defesa de pose inválida
+não foram cobertos artificialmente. Esses números não medem acurácia de mãos reais.
+
+Security-review: controle começa DISABLED, só API explícita habilita intenções;
+disable/reset não emitem CLICK, perda prolongada cancela confirmação e exige
+abertura, falhas desabilitam sem reativação automática. PyAutoGUI não foi importado;
+nenhum mouse real foi movido, clique real ocorreu ou teclado foi controlado.
+Não há automação do SO, webcam, consulta de resolução ou GUI. monotonic é apenas
+a fonte padrão de tempo autorizada; testes/demo usam clock simulado.
+
+### Limitações e próxima fase
+
+Defaults de duração/thresholds não foram calibrados em hardware. Ruído sustentado
+além dos gates ainda pode produzir gesto incorreto; decisões são por uma mão sem
+identidade persistente. Grace começa na primeira ausência reportada; o chamador
+deve enviar update(None) ao perder tracking. Não há reset em background nem
+inferência de perda em intervalos sem amostras de ausência. A sessão é sequencial;
+o sink mantém histórico ilimitado e precisará de retenção adequada a um loop real.
+EMA continua por amostra, não por segundo. Disable/re-enable inicia sessão nova
+e limpa cooldown, exigindo novamente abertura/estabilização. Não há teste manual
+de câmera/ergonomia ou fail-safe real. Duplicidade OpenCV preservada, sem impacto
+na camada Python desta fase.
+
+Próxima fase recomendada: **Fase 7 — integração visual/overlay em dry-run**,
+após nova autorização e plano do diagnóstico/captura correspondente. O backend
+real originalmente previsto para a Fase 6 permanece adiado e exige autorização
+e revisão próprias antes do aceite final do MVP. Nenhuma etapa posterior foi executada.

@@ -1,7 +1,7 @@
 # HGI — Hand Gesture Interface
 
 Projeto local de visão computacional para interpretar gestos da mão.
-**Fase concluída: cursor virtual em dry-run.** O comando abaixo apenas
+**Fase concluída: proteção temporal e opt-in lógico em dry-run.** O comando abaixo apenas
 identifica o projeto. O tracker processa frames RGB fornecidos pelo chamador;
 captura de webcam, pipeline contínuo e controle do mouse ainda não estão integrados.
 
@@ -119,18 +119,26 @@ from hgi.cursor_controller import CursorConfig, CursorController
 
 sink = DryRunCursorSink()
 controller = CursorController(CursorConfig(1920, 1080), sink=sink)
+controller.enable()  # Opt-in de intenções virtuais; não habilita mouse real.
 command = controller.update(hand)
 print(command, sink.commands)
 controller.reset()
 ```
 
-POINT gera MOVE após área ativa, espelhamento e EMA. PINCH gera CLICK lógico
-somente na entrada do gesto; pinça mantida e inatividade geram NONE. A área
+O controller começa DISABLED; update retorna NONE até enable explícito.
+POINT confirmado gera MOVE após área ativa, espelhamento e EMA. PINCH confirmado
+gera CLICK lógico somente após abertura/armamento e fora do cooldown. A área
 padrão vai de 0.1 a 0.9 nos dois eixos, com alpha 0.25. As dimensões são virtuais,
 fornecidas pelo chamador. `mirror_x=True` espera imagem não espelhada;
-desative-o se a entrada já foi espelhada. Reset limpa o estado, preservando o log.
-Perda de mão rearma a intenção de clique; proteção temporal completa permanece
-para a próxima fase. Não há backend de mouse ou consulta ao monitor.
+desative-o se a entrada já foi espelhada. Reset/disable desabilitam, limpam a
+interação e preservam o log. Defaults: confirmação de 80 ms, histerese 0.25/0.32,
+cooldown de 300 ms e grace period de 150 ms. Perda breve preserva EMA e não
+rearma pinça; perda longa exige confirmação/abertura novas. Não há backend de
+mouse ou consulta ao monitor. A demo abaixo usa tempo simulado.
+
+Para configurar ou testar tempo, injete
+`TemporalGestureFilter(TemporalConfig(...), clock=seu_clock)` no parâmetro
+`temporal` do controller; os tipos residem em `hgi.temporal`.
 
 Demo finita sem webcam, depois de instalar o HGI:
 
@@ -140,4 +148,4 @@ python scripts/demo_cursor.py
 
 Veja os contratos e limitações em [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 e [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
-A Fase 6 não foi iniciada.
+A Fase 7 e o controle real não foram iniciados.

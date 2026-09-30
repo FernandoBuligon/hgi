@@ -1,12 +1,13 @@
-# Arquitetura do HGI — estado após a Fase 5
+# Arquitetura do HGI — estado após a Fase 6
 
 O núcleo matemático usa somente a biblioteca padrão Python. O entrypoint identifica o
 projeto e encerra. Geometria e smoothing não fazem I/O, não consultam relógio/FPS,
 não obtêm dimensões reais e não importam bibliotecas de visão ou automação.
 O adaptador de visão usa NumPy e importa MediaPipe somente ao construir o tracker.
 O modelo interno de mão e o reconhecimento geométrico usam somente Python padrão.
-O cursor virtual emite intenções para um sink em memória. Ações reais permanecem
-propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
+O cursor virtual exige enable explícito e filtra temporalmente as observações.
+Começa DISABLED e emite somente intenções para um sink em memória. Ações reais
+permanecem propostas no [plano de implementação](IMPLEMENTATION_PLAN.md).
 
 ## API atual
 
@@ -238,7 +239,11 @@ Primeiro validar os dedos, depois aplicar a prioridade:
 
 POINT, OPEN_HAND e FIST são mutuamente exclusivos; PINCH pode sobrepor-se a eles.
 Uma pinça mantida retorna PINCH a cada chamada. Isso não é um evento de clique:
-histerese, confirmação, debounce e cooldown continuam para incrementos posteriores.
+histerese, confirmação, debounce e cooldown pertencem à camada temporal abaixo.
+`observe(hand)` retorna GestureObservation imutável com raw, pose e pinch_ratio.
+pose é a classificação dos dedos sem prioridade de pinça; ratio=None indica
+ausência de mão. `detect(hand)` permanece compatível e retorna observation.raw.
+O detector calcula as medidas uma vez; o consumidor não recalcula geometria.
 
 ### Configuração, degenerações e limites
 
@@ -273,16 +278,18 @@ flowchart LR
     A[HandTracker] --> B[DetectedHand]
     B --> C[GestureDetector]
     B --> D[CursorController]
-    C --> D
+    C --> T[TemporalGestureFilter]
+    T --> D
     D --> E[CursorCommand]
     E --> F[DryRunCursorSink: memória]
 ```
 
-O chamador fornece uma mão interna ou None. O controller chama o detector
-injetado e reúne mapeamento/EMA, sem conhecer o tracker ou qualquer biblioteca
-de visão. `cursor.py` contém os dados e a fronteira de saída; `cursor_controller.py`
-contém configuração e estado lógico. Não há backend real, relógio, webcam,
-consulta ao monitor, acesso ao SO ou integração com o entrypoint de captura.
+O chamador fornece uma mão interna ou None. Quando habilitado, o controller
+chama detector/filtro temporal injetados e reúne mapeamento/EMA, sem conhecer o
+tracker ou qualquer biblioteca de visão. `cursor.py` contém os dados e a fronteira de saída; `cursor_controller.py`
+contém configuração e estado lógico. O relógio pertence somente ao filtro temporal.
+Não há backend real, webcam, consulta ao monitor, automação de entrada ou
+integração com o entrypoint de captura.
 
 | API | Contrato |
 |---|---|
@@ -292,9 +299,11 @@ consulta ao monitor, acesso ao SO ou integração com o entrypoint de captura.
 | `DryRunCursorSink()` | Recebe todos os comandos, inclusive NONE, armazenando em ordem na memória |
 | `sink.commands` | Snapshot tuple imutável; não expõe a lista interna |
 | `CursorConfig(screen_width, screen_height, ...)` | Dataclass imutável e validada; dimensões lógicas fornecidas explicitamente |
-| `CursorController(config, *, sink=None, detector=None)` | Usa DryRunCursorSink e GestureDetector por padrão; EMA própria por instância |
+| `CursorController(config, *, sink=None, detector=None, temporal=None)` | Começa DISABLED; usa somente DryRunCursorSink, detector/filtro padrão e EMA própria |
 | `controller.update(hand)` | Retorna e emite o mesmo CursorCommand uma vez por atualização válida |
-| `controller.reset()` | Limpa EMA, posição virtual e gesto anterior; preserva histórico do sink |
+| `controller.enable()` / `disable()` | Opt-in explícito / desarme; sem comando emitido pelos métodos |
+| `controller.reset()` | Desabilita e limpa EMA, posição e todo estado temporal; preserva histórico do sink |
+| `controller.state` | ControlState.DISABLED ou ENABLED, somente leitura; ENABLED continua dry-run |
 | `controller.config` / `controller.sink` | Propriedades somente leitura para inspeção |
 
 ### POINT, margens, pixels e espelhamento
@@ -341,25 +350,28 @@ lógica, inclusive sob arredondamentos. Não há compensação por FPS.
 
 ### PINCH, inatividade e reset
 
-PINCH tem a prioridade definida pelo detector. Somente a transição de um gesto
-diferente de PINCH para PINCH emite CLICK; PINCH mantido emite NONE. Não há MOVE
-durante pinça. CLICK usa a última posição virtual, já suavizada; sem MOVE anterior,
-usa o indicador mapeado sem inicializar a EMA. Isso define um alvo lógico, sem
+O filtro temporal confirma PINCH e autoriza CLICK somente armado e fora do
+cooldown. PINCH mantido emite NONE. A entrada de pinça congela MOVE imediatamente,
+inclusive enquanto ainda instável. CLICK usa a última posição virtual, já
+suavizada; sem MOVE anterior, usa o indicador mapeado sem inicializar a EMA. Isso define um alvo lógico, sem
 reposicionar ou consultar o cursor real. A próxima camada deverá decidir como
 executar esse contrato de maneira segura.
 
-PINCH preserva posição/EMA, permitindo retomar POINT com suavização. None,
-UNKNOWN, OPEN_HAND e FIST emitem NONE sem coordenadas e limpam o histórico de
-movimento. NONE preserva o gesto observado (UNKNOWN na ausência). O reset
-explícito limpa também a detecção de transição; ele não apaga comandos observados.
-Geometria inválida limpa estado e propaga ValueError sem emitir um falso NONE.
-Falhas de sink propagam sem retries; o estado lógico já calculado não é revertido.
+PINCH preserva posição/EMA, permitindo retomar POINT com suavização. Ausência
+emite NONE e congela saída, preservando movimento durante o grace period.
+UNKNOWN/OPEN_HAND/FIST ainda instáveis mantêm o gesto estável anterior; quando
+confirmados, emitem NONE e limpam movimento. NONE informa o gesto estável,
+portanto pode indicar POINT ou PINCH durante uma ausência breve, sem executá-los.
+Reset/disable desabilitam e limpam toda a interação, sem apagar comandos observados.
+Qualquer erro de processamento/saída desabilita a sessão e propaga a exceção
+original, sem falso sucesso, retry ou clique pendente.
 
 ### Segurança, observação e limites
 
 O sink implementado apenas adiciona dataclasses a uma lista privada. Nenhum
 mouse real é movido, clique real ocorre ou teclado é controlado. Nenhum módulo
-desta camada importa PyAutoGUI, OpenCV, MediaPipe, NumPy ou APIs do SO.
+desta camada importa PyAutoGUI, OpenCV, MediaPipe ou NumPy. A fonte padrão de
+tempo é monotonic, injetada somente na borda do filtro; não há APIs de automação.
 Configuração e dados finitos são validados; nenhum download, segredo, execução
 dinâmica ou captura foi acrescentado. O Protocol permite futura extensão, mas
 a implementação e os testes atuais usam somente saída em memória.
@@ -370,16 +382,106 @@ Demo finita, com mãos sintéticas e nenhuma biblioteca de hardware:
 python scripts/demo_cursor.py
 ```
 
-Requer HGI instalado, como no README. Imprime MOVE, MOVE, CLICK, NONE, NONE,
-incluindo a supressão de uma pinça mantida. stdout pertence apenas ao script;
-o controller e o sink não fazem I/O.
+Requer HGI instalado, como no README. Usa relógio simulado e mostra DISABLED,
+enable(), confirmação, CLICK único, cooldown sem fila, reabertura e disable().
+stdout pertence apenas ao script; o controller e o sink não fazem I/O.
 
-Limites conhecidos: alternância ruidosa PINCH/outro gesto pode gerar novas
-intenções; perda/reaquisição e reset rearmam a transição. Não há histerese,
-confirmação, cooldown ou identidade persistente. Essas proteções são necessárias
-antes do controle real da Fase 6. Troca de mão sem perda explícita exige reset
+Limites conhecidos: ruído sustentado além dos limiares/duração pode produzir
+gestos incorretos. Os defaults não foram calibrados com hardware. Não há
+identidade persistente. Troca de mão sem perda explícita exige reset
 pelo chamador. Controller/sink são sequenciais, sem garantia entre threads.
 O histórico do sink cresce sem limite, adequado a testes/demos finitas;
 um futuro loop contínuo precisará de saída limitada ou sem retenção integral.
 Ergonomia, precisão das heurísticas e espelhamento da captura real continuam
-dependendo de validação manual posterior. A Fase 6 não foi iniciada.
+dependendo de validação manual posterior. Controle real e Fase 7 não foram iniciados.
+
+## Proteção temporal e opt-in
+
+```text
+DetectedHand → GestureDetector.observe → GestureObservation
+            → TemporalGestureFilter → TemporalDecision
+            → CursorController → CursorCommand → DryRunCursorSink
+```
+
+`temporal.py` contém TemporalConfig imutável, TemporalDecision imutável e
+TemporalGestureFilter. A decisão possui gesture estável, permissões move/click
+e reset_motion. Não há event bus, threads, timers ou contagem de frames.
+O controller mantém somente opt-in e movimento; o filtro mantém transições/tempo.
+
+| Configuração temporal | Padrão | Contrato |
+|---|---|---|
+| stabilization_seconds | 0.08 s | Duração de confirmação; finita e ≥0 |
+| enter_pinch_threshold | 0.25 | Fechar quando ratio ≤ limiar |
+| exit_pinch_threshold | 0.32 | Abrir quando ratio ≥ limiar; exige enter < exit |
+| click_cooldown_seconds | 0.30 s | Intervalo mínimo entre intenções CLICK autorizadas |
+| tracking_grace_seconds | 0.15 s | Tolerância desde a primeira observação de mão ausente |
+
+Todos os parâmetros são finitos, não negativos e rejeitam bool. Zero nas
+durações permite integração imediata explícita; os defaults preservam proteção.
+Os thresholds dimensionless usam a razão da Fase 4. A faixa 0.25..0.32 separa
+fechamento e abertura como margem inicial, sem alegação de calibração empírica.
+TemporalConfig é a autoridade para histerese, mesmo se GestureConfig usar outro
+limiar do rótulo raw. pose e ratio preservados tornam essa distinção possível.
+
+### Confirmação, debounce e cooldown
+
+Um candidato muda somente após persistir por stabilization_seconds; trocar
+o candidato reinicia a contagem. Até lá, o gesto estável anterior permanece.
+Isso tolera UNKNOWN breve durante POINT. As posições usadas são sempre da
+mão atual válida, nunca de um frame armazenado. Nenhuma mão significa NONE.
+Fechar a pinça bloqueia MOVE imediatamente enquanto aguarda confirmação.
+
+O latch de pinça entra em ratio ≤0.25, sai em ratio ≥0.32 e conserva estado
+na faixa intermediária. A entrada/saída passa pela mesma confirmação temporal.
+Uma abertura contínua por 80 ms e estado estável não-PINCH armam o clique.
+Ao entrar em PINCH estável, a ativação é consumida, emitindo CLICK apenas se
+armada e fora do cooldown. Permanecer fechado nunca repete. Uma ativação
+bloqueada é descartada; passar o prazo mantendo PINCH não dispara clique atrasado.
+É necessária nova abertura confirmada e nova entrada. Comparações incluem a borda.
+
+### Relógio e ausência de mão
+
+`TemporalGestureFilter(config=None, *, clock=monotonic)` recebe Callable[[], float].
+Há uma leitura por update, em segundos finitos e não decrescentes. NaN/infinito,
+bool ou regressão geram ValueError e limpam estado. A origem absoluta pode ser
+arbitrária. Testes/demo usam relógios falsos; não há sleep ou relógio no controller.
+Prazos usam `now >= start + duration`, com precisão normal de ponto flutuante.
+
+Ausência curta: preserva gesto estável, latch/armamento de pinça, posição e EMA;
+emite NONE. Cancela candidato/release pendentes: tempo ausente não confirma gesto.
+Na recuperação, PINCH mantido não produz outro CLICK e POINT retoma a mesma EMA.
+
+Ausência ≥150 ms: limpa gesto/candidato, latch e armamento, e solicita reset de
+EMA/posição. Mantém o último clique para não contornar o cooldown. Reaquisição
+começa neutra e precisa confirmar abertura antes de clicar, mesmo se reaparecer
+com a mão fechada. A expiração também é verificada no próximo frame presente,
+sem exigir chamadas intermediárias com ausência. Opt-in continua ENABLED, mas
+nenhuma intenção fica pendente; movimento precisa confirmar novamente.
+
+O grace period começa na primeira amostra ausente, não na última mão presente.
+Sem chamadas não há reset em background; o chamador deve reportar ausência com
+update(None). Lacunas sem observação de ausência não inferem perda de tracking.
+Não compartilhar uma instância entre mãos ou threads; handedness não é identidade.
+
+### Estados de sessão e falhas
+
+| Situação | Resultado |
+|---|---|
+| Construção / DISABLED | Nenhum detector/clock é chamado; update emite somente NONE |
+| enable() | Opt-in explícito; neutro, EMA vazia e PINCH desarmado; repetições são idempotentes |
+| disable() / controller.reset() | DISABLED, limpa toda a temporalidade/cooldown e movimento; nenhum comando emitido |
+| Perda breve | Mantém sessão e interação, congela saída; confirmação pendente descartada |
+| Perda prolongada | Mantém opt-in, limpa interação/movimento, mantém cooldown; exige abertura confirmada |
+| Exceção de detector/filtro/mapeamento/sink | Desabilita, limpa e relança a exceção original; nenhum retry |
+
+Os except Exception existem apenas nas fronteiras para limpar e relançar,
+sem ocultar falhas. Re-enable é uma sessão nova e exige confirmação/abertura;
+nunca conserva clique pendente. Controller.reset também desabilita, uma mudança
+de segurança em relação à Fase 5. O reset direto do filtro limpa somente seu
+estado; sessões devem usar controller.reset para limpar também opt-in e EMA.
+
+O sink permanece exclusivamente DryRunCursorSink; ControlState.ENABLED significa
+autorizar intenções virtuais. Não foi implementado PyAutoGUI, mouse, teclado,
+webcam, consulta de resolução, GUI ou configuração persistente. Antes do controle
+real ainda serão necessários backend/fail-safe, integração de captura e QA manual
+autorizados separadamente. O MVP completo continua pendente.
