@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 import cv2
 import numpy as np
@@ -208,6 +209,59 @@ def handle_key(key: int, controller: CursorController) -> bool:
     return False
 
 
+_Resource = TypeVar("_Resource")
+
+
+@contextmanager
+def _preserve_cleanup_error(
+    resource: AbstractContextManager[_Resource],
+) -> Iterator[_Resource]:
+    """Close resources while keeping the original processing/interrupt error.
+
+    A shutdown error on normal exit propagates. With a primary error already
+    active, attach shutdown diagnostics as notes and re-raise the original.
+    """
+    value = resource.__enter__()
+    try:
+        yield value
+    except BaseException as original:
+        try:
+            resource.__exit__(type(original), original, original.__traceback__)
+        except BaseException as cleanup_error:
+            original.add_note(f"Resource shutdown also failed: {cleanup_error!r}")
+        raise
+    else:
+        resource.__exit__(None, None, None)
+
+
+def _close_windows() -> None:
+    """Destroy windows; keep a pending primary failure and note shutdown errors."""
+    original = sys.exception()
+    try:
+        cv2.destroyAllWindows()
+    except BaseException as cleanup_error:
+        if original is None:
+            raise
+        original.add_note(f"Window shutdown also failed: {cleanup_error!r}")
+
+
+def _run_loop(pipeline: WebcamPipeline, camera: Camera, window_name: str) -> None:
+    """Run sequential frames and local key controls; no pending input queue."""
+    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+    previous, fps = monotonic(), 0.0
+    while True:
+        frame, _ = pipeline.process(camera.read(), fps=fps)
+        now = monotonic()
+        elapsed = now - previous
+        fps = 1.0 / elapsed if elapsed > 0 else 0.0
+        previous = now
+        cv2.imshow(window_name, frame)
+        if pipeline.handle_key(cv2.waitKey(1)):
+            break
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+            break
+
+
 def run_webcam(config: DemoConfig) -> None:
     """Run until Q/Esc/window close or failure; always release all resources."""
     model = config.model_path.expanduser().resolve()
@@ -227,32 +281,22 @@ def run_webcam(config: DemoConfig) -> None:
         cursor_config, sink = configure_output(config)
         window_name = f"HGI - {sink.mode.value}"
         with (
-            Camera(
-                config.camera_index,
-                width=config.frame_width,
-                height=config.frame_height,
+            _preserve_cleanup_error(
+                Camera(
+                    config.camera_index,
+                    width=config.frame_width,
+                    height=config.frame_height,
+                )
             ) as camera,
-            HandTracker(model) as tracker,
+            _preserve_cleanup_error(HandTracker(model)) as tracker,
         ):
             pipeline = WebcamPipeline(
                 tracker,
                 cursor_config,
                 sink=sink,
             )
-            cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
-            previous, fps = monotonic(), 0.0
-            while True:
-                frame, _ = pipeline.process(camera.read(), fps=fps)
-                now = monotonic()
-                elapsed = now - previous
-                fps = 1.0 / elapsed if elapsed > 0 else 0.0
-                previous = now
-                cv2.imshow(window_name, frame)
-                if pipeline.handle_key(cv2.waitKey(1)):
-                    break
-                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                    break
+            _run_loop(pipeline, camera, window_name)
     finally:
         if pipeline is not None:
             pipeline.controller.disable()
-        cv2.destroyAllWindows()
+        _close_windows()
