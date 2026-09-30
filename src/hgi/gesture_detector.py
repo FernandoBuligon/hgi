@@ -1,8 +1,9 @@
 """MVP semantic gesture classification, without actions or temporal state."""
 
+from dataclasses import dataclass
 from enum import Enum
 
-from hgi.finger_state import GestureConfig, detect_fingers, pinch_ratio
+from hgi.finger_state import FingerState, GestureConfig, detect_fingers, pinch_ratio
 from hgi.hand_landmarks import DetectedHand
 
 
@@ -14,6 +15,31 @@ class Gesture(Enum):
     PINCH = "PINCH"
     OPEN_HAND = "OPEN_HAND"
     FIST = "FIST"
+
+
+@dataclass(frozen=True, slots=True)
+class GestureObservation:
+    """Raw label, non-pinch finger pose and ratio from one validated hand.
+
+    A missing ratio means no hand. The temporal layer owns its hysteresis
+    thresholds; pose avoids recovering a non-pinch label from a collapsed raw
+    PINCH. No geometry is recalculated by consumers of this observation.
+    """
+
+    raw: Gesture
+    pose: Gesture
+    pinch_ratio: float | None
+
+
+def _finger_pose(state: FingerState) -> Gesture:
+    fingers = (state.thumb, state.index, state.middle, state.ring, state.pinky)
+    if state.index and not any((state.thumb, state.middle, state.ring, state.pinky)):
+        return Gesture.POINT
+    if all(fingers):
+        return Gesture.OPEN_HAND
+    if not any(fingers):
+        return Gesture.FIST
+    return Gesture.UNKNOWN
 
 
 class GestureDetector:
@@ -34,18 +60,14 @@ class GestureDetector:
 
     def detect(self, hand: DetectedHand | None) -> Gesture:
         """Return one semantic label from internal hand data, without side effects."""
+        return self.observe(hand).raw
+
+    def observe(self, hand: DetectedHand | None) -> GestureObservation:
+        """Measure once, preserving pose and ratio for the temporal boundary."""
         if hand is None:
-            return Gesture.UNKNOWN
+            return GestureObservation(Gesture.UNKNOWN, Gesture.UNKNOWN, None)
         state = detect_fingers(hand, self._config)
-        if pinch_ratio(hand, self._config) <= self._config.pinch_threshold:
-            return Gesture.PINCH
-        fingers = (state.thumb, state.index, state.middle, state.ring, state.pinky)
-        if state.index and not any(
-            (state.thumb, state.middle, state.ring, state.pinky)
-        ):
-            return Gesture.POINT
-        if all(fingers):
-            return Gesture.OPEN_HAND
-        if not any(fingers):
-            return Gesture.FIST
-        return Gesture.UNKNOWN
+        ratio = pinch_ratio(hand, self._config)
+        pose = _finger_pose(state)
+        raw = Gesture.PINCH if ratio <= self._config.pinch_threshold else pose
+        return GestureObservation(raw, pose, ratio)
