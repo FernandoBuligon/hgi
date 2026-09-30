@@ -128,8 +128,9 @@ def test_cli_default_real_flag_and_paired_override(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("error", [RuntimeError("mouse failure"), KeyboardInterrupt()])
+@pytest.mark.parametrize("cleanup_failure", [None, "tracker", "camera", "windows"])
 def test_real_backend_fault_closes_demo_and_preserves_original(
-    monkeypatch, tmp_path, hand_factory, error
+    monkeypatch, tmp_path, hand_factory, error, cleanup_failure
 ):
     import hgi.webcam as webcam
 
@@ -145,9 +146,22 @@ def test_real_backend_fault_closes_demo_and_preserves_original(
     capture.read.return_value = (True, np.zeros((120, 160, 3), np.uint8))
     monkeypatch.setenv("DISPLAY", ":fake")
     monkeypatch.setattr(webcam, "HandTracker", Mock(return_value=tracker))
+    if cleanup_failure == "tracker":
+
+        class BrokenTracker(FakeTracker):
+            def __exit__(self, *args):
+                super().__exit__(*args)
+                raise RuntimeError("tracker shutdown")
+
+        tracker = BrokenTracker(tracker.hands)
+        monkeypatch.setattr(webcam, "HandTracker", Mock(return_value=tracker))
+    if cleanup_failure == "camera":
+        capture.release.side_effect = cv2.error("camera shutdown")
     monkeypatch.setattr(cv2, "VideoCapture", Mock(return_value=capture))
     for name in ("namedWindow", "imshow", "destroyAllWindows"):
         monkeypatch.setattr(cv2, name, Mock())
+    if cleanup_failure == "windows":
+        cv2.destroyAllWindows.side_effect = cv2.error("window shutdown")
     monkeypatch.setattr(cv2, "waitKey", Mock(side_effect=[ord("e"), -1, -1]))
     monkeypatch.setattr(cv2, "getWindowProperty", Mock(return_value=1))
     clock = Mock(side_effect=[0.0, 0.2])
@@ -170,6 +184,8 @@ def test_real_backend_fault_closes_demo_and_preserves_original(
     with pytest.raises(type(error)) as caught:
         run_webcam(DemoConfig(model_path=model, real_control=True))
     assert caught.value is error
+    if cleanup_failure:
+        assert any("shutdown" in note for note in error.__notes__)
     assert sink.failed
     assert all(c.state is ControlState.DISABLED for c in instances)
     backend.move_to.assert_called_once()
