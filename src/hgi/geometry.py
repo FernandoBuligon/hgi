@@ -89,12 +89,13 @@ def _validate_dimensions(width: int, height: int) -> None:
 def normalized_to_pixels(point: Point2D, width: int, height: int) -> Point2D:
     """Clip normalized coordinates and map 0..1 to 0..dimension-1.
 
-    Keep subpixel floats: no rounding occurs here. A one-pixel axis is always 0.
+    Keep subpixel values: no rounding occurs here. A one-pixel axis is always 0.
+    Clip after multiplication too, since float rounding can exceed the last pixel.
     """
     _validate_dimensions(width, height)
     return Point2D(
-        clamp(point.x, 0.0, 1.0) * (width - 1),
-        clamp(point.y, 0.0, 1.0) * (height - 1),
+        clamp(clamp(point.x, 0.0, 1.0) * (width - 1), 0.0, width - 1),
+        clamp(clamp(point.y, 0.0, 1.0) * (height - 1), 0.0, height - 1),
     )
 
 

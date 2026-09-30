@@ -5,6 +5,12 @@ from math import isfinite
 from hgi.geometry import Point2D
 
 
+def _blend_coordinate(previous: float, current: float, alpha: float) -> float:
+    if previous == current:
+        return current
+    return (1 - alpha) * previous + alpha * current
+
+
 class ExponentialSmoother:
     """An EMA of 2D points with a fixed per-update factor in 0 < alpha <= 1.
 
@@ -28,13 +34,14 @@ class ExponentialSmoother:
 
         Weighted addition equals previous + alpha * (current - previous),
         while avoiding overflow in the subtraction of opposing large values.
+        An unchanged axis passes through exactly, avoiding rounding drift.
         """
         if self._previous is None:
             self._previous = point
         else:
             self._previous = Point2D(
-                (1 - self._alpha) * self._previous.x + self._alpha * point.x,
-                (1 - self._alpha) * self._previous.y + self._alpha * point.y,
+                _blend_coordinate(self._previous.x, point.x, self._alpha),
+                _blend_coordinate(self._previous.y, point.y, self._alpha),
             )
         return self._previous
 
