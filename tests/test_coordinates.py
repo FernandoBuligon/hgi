@@ -64,6 +64,13 @@ def test_normalized_to_pixels(point: Point2D, expected: Point2D) -> None:
     assert normalized_to_pixels(point, 1920, 1080) == expected
 
 
+@pytest.mark.parametrize("size", [(10**16, 100), (100, 10**16)])
+def test_float_rounding_cannot_exceed_last_pixel(size: tuple[int, int]) -> None:
+    result = normalized_to_pixels(Point2D(1.0, 1.0), *size)
+    assert 0 <= result.x <= size[0] - 1
+    assert 0 <= result.y <= size[1] - 1
+
+
 @pytest.mark.parametrize(
     ("point", "expected"),
     [

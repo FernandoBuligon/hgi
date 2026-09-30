@@ -42,6 +42,22 @@ def test_weighted_average_avoids_overflow_for_opposing_large_points() -> None:
     assert smoother.update(Point2D(-1e308, 1e308)) == Point2D(0, 0)
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        (Point2D(0.1, 0), Point2D(0.1, 1), Point2D(0.1, 0.2)),
+        (Point2D(0, 0.1), Point2D(1, 0.1), Point2D(0.2, 0.1)),
+        (Point2D(0.1, 0.1), Point2D(0.1, 0.1), Point2D(0.1, 0.1)),
+    ],
+)
+def test_stationary_axes_do_not_drift(
+    first: Point2D, second: Point2D, expected: Point2D
+) -> None:
+    smoother = ExponentialSmoother(alpha=0.2)
+    smoother.update(first)
+    assert smoother.update(second) == expected
+
+
 @pytest.mark.parametrize("alpha", [0, -0.1, 1.01, nan, inf, -inf, True, False])
 def test_invalid_alpha_is_rejected(alpha: float) -> None:
     with pytest.raises(ValueError):
