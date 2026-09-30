@@ -1190,3 +1190,20 @@ Python. Não se promete suporte gráfico em todo ambiente Wayland/headless.
 própria Fase 7 com webcam. Depois, discutir autorização e plano específicos de
 backend real/fail-safe, ainda adiados. Fase 8/extras, publicação e controle real
 não foram iniciados. O MVP completo permanece pendente.
+
+### Ajuste da Fase 7 — feedback visual do último CLICK
+
+O usuário relatou no smoke manual que o CLICK de um único frame é difícil de
+confirmar no overlay. Isso registra somente o problema relatado, sem inferir
+aceite dos demais itens do smoke. Escopo: observabilidade/UI, sem alterar
+CursorController, TemporalGestureFilter, debounce/cooldown ou geração de comandos.
+
+Plano curto: escrever testes RED de feedback com clock falso e integração;
+implementar contador/timestamp da UI e snapshot imutável; mostrar indicação
+RECENT/borda por 0.5 s e contador; revisar Python/segurança, executar suíte
+completa/cobertura/Ruff/compileall/pip check e atualizar documentação.
+Reutilizar fake_clock, FakeTracker, OverlayState e sink existentes. O clock
+visual será injetável separadamente do temporal. Nenhum timer/thread/histórico
+de comandos novo. Sessão visual começa na abertura da demo; R limpa contador
+e feedback, D/E e mudanças de resolução preservam o total. Desenhar repetidamente
+um snapshot não contabiliza outra intenção. Fase 8 permanece fora do escopo.

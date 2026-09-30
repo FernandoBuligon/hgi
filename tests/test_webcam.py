@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import cv2
 import numpy as np
 import pytest
+from conftest import FakeClock
 from test_cursor_controller import pinched
 
 from hgi.cursor import ControlState, CursorAction
@@ -239,3 +240,48 @@ def test_cli_help_absent_model_and_forbidden_control_flag(tmp_path, capsys):
     with pytest.raises(SystemExit) as control_exit:
         main(["--control"])
     assert control_exit.value.code == 2
+
+
+def test_ui_click_persistence_does_not_repeat_commands_or_advance_temporal_clock(
+    hand_factory, fake_clock
+):
+    ui_clock = FakeClock(now=10.0)
+    point = hand_factory("index", aspect_ratio=4 / 3)
+    tracker = FakeTracker((point,))
+    pipeline = WebcamPipeline(
+        tracker, CursorConfig(1920, 1080, mirror_x=False),
+        clock=fake_clock, ui_clock=ui_clock,
+    )
+    frame = np.zeros((120, 160, 3), np.uint8)
+    pipeline.process(frame)
+    pipeline.handle_key(ord("e"))
+    pipeline.process(frame)
+    fake_clock.now += 0.08
+    pipeline.process(frame)
+    sink = pipeline.controller.sink
+    sink.emit = Mock(wraps=sink.emit)
+    tracker.hands = (pinched(point),)
+    fake_clock.now += 0.02
+    pipeline.process(frame)
+    fake_clock.now += 0.08
+    _, clicked = pipeline.process(frame)
+    assert clicked.command.action is CursorAction.CLICK
+    assert clicked.click_feedback.recent_click
+    assert clicked.click_feedback.click_count == 1
+    for ui_clock.now, recent in ((10.499, True), (10.5, False)):
+        _, held = pipeline.process(frame)
+        assert held.command.action is CursorAction.NONE
+        assert held.click_feedback.recent_click is recent
+        assert held.click_feedback.click_count == 1
+        assert held.temporal == clicked.temporal  # UI time does not advance cooldown.
+        assert sink.commands == (held.command,)
+    actions = [call.args[0].action for call in sink.emit.call_args_list]
+    assert actions == [CursorAction.NONE, CursorAction.CLICK, CursorAction.NONE, CursorAction.NONE]
+    pipeline.handle_key(ord("d"))
+    assert pipeline.process(frame)[1].click_feedback.click_count == 1
+    pipeline.handle_key(ord("e"))
+    assert pipeline.process(frame)[1].click_feedback.click_count == 1
+    pipeline.handle_key(ord("r"))
+    reset = pipeline.process(frame)[1]
+    assert reset.click_feedback.click_count == 0 and not reset.click_feedback.recent_click
+    assert pipeline.controller.state is ControlState.DISABLED
