@@ -7,8 +7,8 @@ de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente **somente a Fase 1 — bootstrap**, cujo resultado está registrado
-na seção 9. As fases 2–10 continuam propostas, sem autorização de execução.
+posteriormente a **Fase 1 — bootstrap** e a **Fase 2 — matemática e smoothing**,
+registradas nas seções 9 e 10. As fases 3–10 continuam propostas, sem autorização.
 Não houve download de modelo, abertura de webcam, automação ou publicação.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
@@ -72,7 +72,10 @@ flowchart LR
 | `action_controller.py` | Alvo virtual, backend de mouse injetável e cooldown |
 | `overlay.py` | Landmarks, mão, gesto, modo, alvo virtual e feedback de pinça |
 
-`landmarks.py` é a única extensão estrutural proposta: evita índices mágicos e
+Os módulos implementados na Fase 2 e seus contratos estão em
+[ARCHITECTURE.md](ARCHITECTURE.md). `Point2D` e `Region2D` residem em `geometry.py`;
+`landmarks.py` permanece proposto para a adaptação do tracker na Fase 3, onde
+evitará índices mágicos e
 acoplamento das regras à API externa. O backend PyAutoGUI poderá permanecer
 pequeno no controlador, sem hierarquia de plugins. Imports de automação serão
 adiados até `--control`; testes e dry-run usarão um backend sem efeitos reais.
@@ -124,7 +127,7 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 |---|---|---|---|
 | 0 — plano | Somente `docs/IMPLEMENTATION_PLAN.md` | Revisar requisitos, fontes, riscos, escopo e diff; sem teste de aplicação | Sem hardware. Plano contém arquitetura, ordem, testes e aceites; demais arquivos preservados |
 | 1 — bootstrap | Pacote/entrypoint, `pyproject.toml`, README mínimo e ajustes de ignore | `test_bootstrap.py`: importação silenciosa do pacote/entrypoint sem bibliotecas de hardware; execução com identificação. Compileall, pytest, Ruff e instalação limpa | Sem webcam. Pacote importável/instalável, testes passam e nenhuma captura automática; concluída no escopo autorizado, conforme seção 9 |
-| 2 — geometria e smoothing | `landmarks.py`, `geometry.py`, `smoothing.py`, parâmetros iniciais em `config.py` | RED/GREEN: zero, 3-4-5, escala zero, valores não finitos, proporção do frame, limites, clipping, margens inválidas, alpha inválido/limite 1, sequência previsível, reset e configuração inválida | Sem hardware. Resultados determinísticos e cobertura ≥80% em cada módulo de lógica pura implementado |
+| 2 — geometria e smoothing | `geometry.py`, `smoothing.py`; pontos/regiões e parâmetros passados explicitamente, sem arquivo de configuração global | RED/GREEN: zero, 3-4-5, referência inválida, valores não finitos, dimensões fornecidas, limites, clipping, regiões inválidas, espelhamento, alpha inválido/limite 1, sequência previsível, reset e regressões de arredondamento | Concluída sem hardware: 142 testes novos, 144 no total e 100% de linhas/branches nos novos módulos; evidências na seção 10 |
 | 3 — tracker e diagnóstico | `hand_tracker.py`, captura em `app.py`, desenho mínimo em `overlay.py`; preparação do modelo | `test_hand_tracker.py`/`test_app.py`: resultados sem mão/com mão, handedness ausente, BGR/RGB, timestamps, modelo ausente/inválido, câmera indisponível, leitura interrompida e limpeza com mocks. Manual: landmarks e saída com q/Esc | Webcam, modelo local e GUI. Mão/landmarks estáveis; câmera/tracker/janelas liberados em saída e exceção; falha de captura termina sem loop silencioso |
 | 4 — dedos e gestos | `gesture_detector.py` e debug básico | Fixtures sintéticas: dedos, polegar, ambas as mãos, rotações, pinça invariável por escala, limiares inclusivos, faixa de histerese, ruído, N frames, abertura, prioridade e ausência de mão | Lógica sem webcam; validação visual exige câmera. Estados e transições previsíveis, sem usar coordenada vertical isolada como regra geral |
 | 5 — cursor virtual | `action_controller.py` em dry-run, mapa/smoothing e alvo no overlay | `test_action_controller.py`: bordas, centro, clipping, margem, suavização, reset e ausência total de chamadas reais; simular tamanho de tela | Webcam/GUI para ergonomia. Alvo virtual suave e limitado; dry-run funciona sem carregar automação |
@@ -216,8 +219,8 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após o bootstrap autorizado,
-a próxima fase proposta é **Fase 2 — geometria e smoothing**, que aguardará
+O aceite da Fase 0 foi restrito ao documento. Após a matemática autorizada,
+a próxima fase proposta é **Fase 3 — HandTracker**, que aguardará
 instrução do usuário. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
 
@@ -235,7 +238,8 @@ e APIs da versão selecionada durante bootstrap e integração, antes de impleme
 
 ## 9. Evidências da Fase 1 — bootstrap
 
-**Estado: concluída no escopo mínimo solicitado pelo usuário. Fase 2 não iniciada.**
+**Estado: concluída no escopo mínimo solicitado pelo usuário.** No encerramento
+da Fase 1, a Fase 2 ainda não estava iniciada; sua execução posterior está na seção 10.
 
 Arquivos criados: `pyproject.toml`, `README.md`, `src/hgi/__init__.py`,
 `src/hgi/__main__.py` e `tests/test_bootstrap.py`. Arquivos modificados:
@@ -305,3 +309,87 @@ Referências de configuração:
 [pytest](https://docs.pytest.org/en/stable/reference/customize.html),
 [Ruff](https://docs.astral.sh/ruff/configuration/) e
 [cobertura de subprocessos](https://pytest-cov.readthedocs.io/en/latest/subprocess-support.html).
+
+## 10. Evidências da Fase 2 — geometria, coordenadas e smoothing
+
+**Estado: concluída. Fase 3 não iniciada. Nenhum acesso a hardware.**
+
+Fonte das garantias: objetivos de geometria/EMA do usuário e Fase 2 deste plano.
+Para cada grupo, testes foram escritos e executados antes da implementação.
+Os RED iniciais foram erros de coleta pelo módulo/API ainda inexistente, não
+falhas de dependências externas. Os testes de regressão tiveram RED em runtime.
+
+| Grupo/garantia | Testes | RED real | GREEN real | Checkpoints locais |
+|---|---|---|---|---|
+| Pontos finitos/imutáveis, distância, razão por escala e clamp | `test_geometry.py` | 1 erro de coleta: `hgi.geometry` inexistente | 36 passaram | `02df5b7` → `6b41f35` |
+| Conversões, regiões, margens, limites e espelhamento | `test_coordinates.py` | 1 erro de coleta: `Region2D` inexistente | 80 passaram; 116 com o primeiro grupo | `310d57b` → `2dabc64` |
+| EMA em X/Y, alpha, primeiro ponto, reset e instâncias independentes | `test_smoothing.py` | 1 erro de coleta: `hgi.smoothing` inexistente | 21 passaram | `94f2499` → `d0ce052` |
+| Clamp após aritmética e eixos EMA estacionários | Coordenadas + smoothing | 5 falhas, 101 passaram; violações de limites e deriva por arredondamento | 106 passaram | `310586f` → `87f935d` |
+
+Comandos dos ciclos: `python -m pytest -q tests/test_geometry.py`, depois
+`python -m pytest -q tests/test_coordinates.py`, depois
+`python -m pytest -q tests/test_smoothing.py`. No fechamento das transformações,
+geometria e coordenadas foram verificadas juntas. Nas regressões, executar
+`python -m pytest -q tests/test_coordinates.py tests/test_smoothing.py` reproduziu
+as cinco falhas e comprovou o GREEN após a correção.
+
+Arquivos criados: `src/hgi/geometry.py`, `src/hgi/smoothing.py`,
+`tests/test_geometry.py`, `tests/test_coordinates.py`, `tests/test_smoothing.py`
+e `docs/ARCHITECTURE.md`. Modificados: README e este plano. Entry point,
+`AGENTS.md`, dependências e configurações de ferramentas foram preservados.
+
+Decisões matemáticas e de escopo:
+
+- Pontos e regiões são dataclasses imutáveis pequenas, sem hierarquia de unidades.
+  Todos os pontos/regiões envolvidos numa operação devem compartilhar a unidade.
+  Coordenadas negativas são válidas; NaN e infinito são rejeitados.
+- Pixels usam `0..dimensão−1`, com subpixels e clipping. Centro de 1920×1080:
+  `(959.5, 539.5)`. Dimensões devem ser inteiros positivos, sem bool. Eixo de um
+  pixel tem posição 0 e inversa normalizada canônica 0.
+- Região útil é um retângulo fornecido explicitamente; clipping precede a
+  normalização e o espelhamento relativo à região. Não há consulta ao monitor.
+- Distância normalizada divide pela referência positiva na mesma unidade;
+  é invariante sob escala uniforme. Distâncias físicas em frames retangulares
+  deverão usar conversão por eixo antes da comparação, conforme arquitetura.
+- Alpha é fornecido ao construtor e somente leitura, com `0 < alpha <= 1`.
+  Estado contém apenas o fator e o último ponto. Primeiro ponto passa intacto;
+  reset descarta o histórico. A regra é por chamada, sem compensação de FPS.
+- Forma ponderada do EMA evita subtração com overflow. Eixos estacionários são
+  preservados exatamente. Conversão reaplica clamp após multiplicação para
+  conter arredondamento além da borda, mesmo com dimensões numéricas grandes.
+- `landmarks.py` e configuração de hardware continuam adiados: as funções puras
+  e o construtor recebem os parâmetros necessários, evitando arquivos/camadas
+  sem uso nesta fase. Não foram implementados ângulos, gestos ou tracking.
+
+Fechamento do `verification-loop` e revisão `python-reviewer`:
+
+| Verificação executada | Resultado |
+|---|---|
+| `python -m pytest -q` | 144 passaram: 142 novos e 2 de bootstrap |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 100% total; geometry: 59 instruções/16 branches; smoothing: 22 instruções/6 branches, todos cobertos |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | Nenhum requisito quebrado; aviso de cache indisponível do sandbox, sem falha |
+| Execução matemática via `python -I -S -B` com src explícito | PASS sem site-packages; nenhum import de cv2, MediaPipe, NumPy ou PyAutoGUI |
+| Inspeção AST dos imports dos novos módulos | Somente dataclasses/math e hgi.geometry |
+| Revisão de código Python | Tipagem/docstrings públicas, estado mínimo, erros explícitos e bordas revisados; sem CRITICAL/HIGH pendente |
+| `git diff --check` e revisão do diff da fase | Sem problemas de whitespace ou arquivos fora do escopo |
+
+Mypy/Pyright não estão instalados; revisão de tipos foi manual, sem acrescentar
+ferramentas. Nenhum teste foi desativado. Cobertura de 100% não comprova integração
+de hardware; esta fase não requer teste manual com dispositivo.
+
+Problemas corrigidos: E501/formatação de uma condição longa; classificação
+temporária de import pelo Ruff enquanto smoothing.py ainda não existia; os dois
+casos numéricos acima, reproduzidos por cinco testes antes da correção. Nenhuma
+regra ou aviso foi desativado para obter PASS.
+
+Limitações registradas: unidade dos pontos depende do chamador; floats têm
+precisão/faixa limitadas; alpha é por atualização, não por segundo. Espelhamento
+da imagem e handedness precisarão de coerência na futura integração. O conflito
+OpenCV registrado anteriormente permanece pendente para a fase de hardware;
+nenhum pacote foi instalado, removido, reinstalado ou importado para visão nesta fase.
+Os checkpoints pertencem à branch `mais` e serão mantidos; não houve push.
+Próxima fase recomendada: Fase 3, somente após instrução do usuário e preparação
+do ambiente/modelo e dos testes manuais correspondentes.
