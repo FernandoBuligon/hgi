@@ -10,10 +10,17 @@ from hgi.gesture_detector import Gesture
 
 
 class ControlState(Enum):
-    """Explicit logical opt-in; ENABLED still uses only dry-run output."""
+    """Explicit session opt-in, independent of the selected output backend."""
 
     DISABLED = "DISABLED"
     ENABLED = "ENABLED"
+
+
+class CursorMode(Enum):
+    """Unambiguous output labels, separate from session enable/disable."""
+
+    DRY_RUN = "DRY-RUN"
+    REAL_CONTROL = "REAL CONTROL"
 
 
 class CursorAction(Enum):
@@ -58,7 +65,7 @@ class CursorSink(Protocol):
     """Small output boundary; implementations define how intentions are observed."""
 
     def emit(self, command: CursorCommand) -> None:
-        """Receive one intention. Only an in-memory implementation exists now."""
+        """Receive one intention; implementations own any output side effects."""
         ...
 
 
@@ -77,6 +84,11 @@ class DryRunCursorSink:
         ):
             raise ValueError("max_history must be a positive integer or None")
         self._commands: deque[CursorCommand] = deque(maxlen=max_history)
+
+    @property
+    def mode(self) -> CursorMode:
+        """Identify the in-memory output without consulting any device."""
+        return CursorMode.DRY_RUN
 
     @property
     def commands(self) -> tuple[CursorCommand, ...]:

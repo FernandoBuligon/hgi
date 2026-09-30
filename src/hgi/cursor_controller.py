@@ -2,7 +2,13 @@
 
 from dataclasses import dataclass
 
-from hgi.cursor import ControlState, CursorAction, CursorCommand, DryRunCursorSink
+from hgi.cursor import (
+    ControlState,
+    CursorAction,
+    CursorCommand,
+    CursorSink,
+    DryRunCursorSink,
+)
 from hgi.geometry import (
     Point2D,
     Region2D,
@@ -50,21 +56,21 @@ class CursorController:
     Own EMA/position, not gesture timing. Missing hands never move or click.
     Short tracking gaps preserve motion; the filter requests resets on timeout
     or stable inactivity. Errors disable and propagate. Use sequentially for
-    one hand; only DryRunCursorSink output is supported in this phase.
+    one hand. The default sink is dry-run; backend effects stay outside this module.
     """
 
     def __init__(
         self,
         config: CursorConfig,
         *,
-        sink: DryRunCursorSink | None = None,
+        sink: CursorSink | None = None,
         detector: GestureDetector | None = None,
         temporal: TemporalGestureFilter | None = None,
     ) -> None:
-        if sink is not None and not isinstance(sink, DryRunCursorSink):
-            raise TypeError("This phase requires a DryRunCursorSink")
+        if sink is not None and not callable(getattr(sink, "emit", None)):
+            raise TypeError("Output must implement CursorSink.emit")
         self._config = config
-        self._sink = sink if sink is not None else DryRunCursorSink()
+        self._sink: CursorSink = sink if sink is not None else DryRunCursorSink()
         self._detector = detector if detector is not None else GestureDetector()
         self._smoother = ExponentialSmoother(config.smoothing_alpha)
         self._temporal = temporal if temporal is not None else TemporalGestureFilter()
@@ -78,7 +84,7 @@ class CursorController:
         return self._config
 
     @property
-    def sink(self) -> DryRunCursorSink:
+    def sink(self) -> CursorSink:
         """Expose the output boundary for inspection; the default is dry-run."""
         return self._sink
 
@@ -160,7 +166,7 @@ class CursorController:
                 command = self._command(hand, decision)
             self._sink.emit(command)
             return command
-        except Exception:
+        except BaseException:
             # Safety boundary: clean up, never hide the original failure.
             self.disable()
             raise

@@ -1,9 +1,9 @@
 """Readable synthetic hands; all geometry remains real HGI code."""
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from math import cos, radians, sin
-import sys
 from typing import Literal
 
 import pytest
