@@ -3,11 +3,11 @@
 from dataclasses import replace
 
 import pytest
+from test_cursor_controller import at_indicator, pinched
 
 from hgi.cursor import CursorAction, DryRunCursorSink
 from hgi.cursor_controller import CursorConfig, CursorController
 from hgi.temporal import TemporalGestureFilter
-from test_cursor_controller import at_indicator, pinched
 
 
 def make_controller(clock, sink=None) -> CursorController:
@@ -77,7 +77,7 @@ def test_tracking_gap_freezes_output_preserves_ema_then_long_loss_resets_it(
     controller.update(None)
     fake_clock.now = 0.4
     assert controller.update(at_indicator(point, 0.9, 0.9)).action is CursorAction.NONE
-    fake_clock.now = 0.48
+    fake_clock.now += 0.08
     resumed = controller.update(at_indicator(point, 0.9, 0.9))
     assert resumed.action is CursorAction.MOVE and resumed.x == pytest.approx(1000)
 

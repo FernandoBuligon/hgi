@@ -1,8 +1,8 @@
-"""Virtual cursor pipeline over HGI data; no display, devices or clock."""
+"""Opt-in virtual cursor mapping; timing belongs to the injected temporal filter."""
 
 from dataclasses import dataclass
 
-from hgi.cursor import CursorAction, CursorCommand, CursorSink, DryRunCursorSink
+from hgi.cursor import ControlState, CursorAction, CursorCommand, DryRunCursorSink
 from hgi.geometry import (
     Point2D,
     Region2D,
@@ -13,6 +13,7 @@ from hgi.geometry import (
 from hgi.gesture_detector import Gesture, GestureDetector
 from hgi.hand_landmarks import DetectedHand, HandLandmark
 from hgi.smoothing import ExponentialSmoother
+from hgi.temporal import TemporalDecision, TemporalGestureFilter
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,28 +45,31 @@ class CursorConfig:
 
 
 class CursorController:
-    """Recognize, map, smooth and emit intentions to a dry-run sink by default.
+    """Start DISABLED; map temporal permissions to intentions only after enable.
 
-    POINT alone moves. PINCH clicks once on entry at the last virtual position,
-    or the mapped indicator if no position exists. A held PINCH emits NONE.
-    Inactivity clears motion; reset/tracking loss also rearms the logical edge.
-    This edge rule is not a safety gate for a future real mouse backend.
-    Use one instance sequentially for one tracked hand; identity is not inferred.
+    Own EMA/position, not gesture timing. Missing hands never move or click.
+    Short tracking gaps preserve motion; the filter requests resets on timeout
+    or stable inactivity. Errors disable and propagate. Use sequentially for
+    one hand; only DryRunCursorSink output is supported in this phase.
     """
 
     def __init__(
         self,
         config: CursorConfig,
         *,
-        sink: CursorSink | None = None,
+        sink: DryRunCursorSink | None = None,
         detector: GestureDetector | None = None,
+        temporal: TemporalGestureFilter | None = None,
     ) -> None:
+        if sink is not None and not isinstance(sink, DryRunCursorSink):
+            raise TypeError("This phase requires a DryRunCursorSink")
         self._config = config
         self._sink = sink if sink is not None else DryRunCursorSink()
         self._detector = detector if detector is not None else GestureDetector()
         self._smoother = ExponentialSmoother(config.smoothing_alpha)
+        self._temporal = temporal if temporal is not None else TemporalGestureFilter()
         self._position: Point2D | None = None
-        self._previous_gesture = Gesture.UNKNOWN
+        self._state = ControlState.DISABLED
 
     @property
     def config(self) -> CursorConfig:
@@ -73,9 +77,26 @@ class CursorController:
         return self._config
 
     @property
-    def sink(self) -> CursorSink:
+    def sink(self) -> DryRunCursorSink:
         """Expose the output boundary for inspection; the default is dry-run."""
         return self._sink
+
+    @property
+    def state(self) -> ControlState:
+        """Return explicit opt-in state; detecting a hand never enables control."""
+        return self._state
+
+    def enable(self) -> None:
+        """Opt in from neutral/unarmed state; repeated enable calls do nothing."""
+        if self._state is ControlState.DISABLED:
+            self.reset()
+            self._state = ControlState.ENABLED
+
+    def disable(self) -> None:
+        """Disarm, cancel pending gestures and clear motion without emitting."""
+        self._state = ControlState.DISABLED
+        self._temporal.reset()
+        self._clear_motion()
 
     def _map_indicator(self, hand: DetectedHand) -> Point2D:
         tip = hand.landmarks[HandLandmark.INDEX_FINGER_TIP]
@@ -97,37 +118,44 @@ class CursorController:
             CursorAction.MOVE, self._position.x, self._position.y, Gesture.POINT
         )
 
-    def update(self, hand: DetectedHand | None) -> CursorCommand:
-        """Return and emit exactly one command; NONE is an observable idle update.
+    def _command(
+        self, hand: DetectedHand | None, decision: TemporalDecision
+    ) -> CursorCommand:
+        if decision.reset_motion:
+            self._clear_motion()
+        if hand is not None and decision.click:
+            if self._position is None:
+                self._position = self._map_indicator(hand)
+            return CursorCommand(
+                CursorAction.CLICK, self._position.x, self._position.y, Gesture.PINCH
+            )
+        if hand is not None and decision.move:
+            return self._move(hand)
+        return CursorCommand(CursorAction.NONE, gesture=decision.gesture)
 
-        Invalid geometry resets state and propagates ValueError, emitting nothing.
-        PINCH freezes the position and EMA until POINT resumes. Other gestures
-        and absence discard motion. Output errors propagate without retrying.
+    def update(self, hand: DetectedHand | None) -> CursorCommand:
+        """Observe/filter only while enabled, then return and emit one intention.
+
+        Any processing/output exception disables the interaction and propagates
+        unchanged. No retry or pending click survives. NONE records disabled or
+        inactive updates without controlling anything. No clock is read here.
         """
         try:
-            gesture = self._detector.detect(hand)
-        except ValueError:
-            self.reset()
+            command = CursorCommand(CursorAction.NONE, gesture=Gesture.UNKNOWN)
+            if self._state is ControlState.ENABLED:
+                decision = self._temporal.update(self._detector.observe(hand))
+                command = self._command(hand, decision)
+            self._sink.emit(command)
+            return command
+        except Exception:
+            # Safety boundary: clean up, never hide the original failure.
+            self.disable()
             raise
-        if hand is not None and gesture is Gesture.POINT:
-            command = self._move(hand)
-        elif hand is not None and gesture is Gesture.PINCH:
-            command = CursorCommand(CursorAction.NONE, gesture=gesture)
-            if self._previous_gesture is not Gesture.PINCH:
-                if self._position is None:
-                    self._position = self._map_indicator(hand)
-                command = CursorCommand(
-                    CursorAction.CLICK, self._position.x, self._position.y, gesture
-                )
-        else:
-            self.reset()
-            command = CursorCommand(CursorAction.NONE, gesture=gesture)
-        self._previous_gesture = gesture
-        self._sink.emit(command)
-        return command
 
-    def reset(self) -> None:
-        """Clear EMA, position and gesture edge, preserving the sink's history."""
+    def _clear_motion(self) -> None:
         self._smoother.reset()
         self._position = None
-        self._previous_gesture = Gesture.UNKNOWN
+
+    def reset(self) -> None:
+        """Disable and clear all interaction state, preserving output history."""
+        self.disable()

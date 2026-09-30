@@ -8,6 +8,13 @@ from hgi.geometry import Point2D
 from hgi.gesture_detector import Gesture
 
 
+class ControlState(Enum):
+    """Explicit logical opt-in; ENABLED still uses only dry-run output."""
+
+    DISABLED = "DISABLED"
+    ENABLED = "ENABLED"
+
+
 class CursorAction(Enum):
     """Logical actions only; NONE records an update without movement or click."""
 
