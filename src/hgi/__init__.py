@@ -1,0 +1,1 @@
+"""HGI — Hand Gesture Interface."""

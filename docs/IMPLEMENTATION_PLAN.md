@@ -6,10 +6,10 @@ Fonte de requisitos: [AGENTS.md](../AGENTS.md). O HGI será uma aplicação loca
 de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
-Esta entrega executa **somente a Fase 0** e cria apenas este documento. As fases
-seguintes são propostas, não iniciadas nem autorizadas por este plano. Não há
-instalação, download de modelo, abertura de webcam, automação ou publicação nesta
-fase. Nenhuma funcionalidade está marcada como concluída.
+Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
+posteriormente **somente a Fase 1 — bootstrap**, cujo resultado está registrado
+na seção 9. As fases 2–10 continuam propostas, sem autorização de execução.
+Não houve download de modelo, abertura de webcam, automação ou publicação.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
@@ -123,15 +123,15 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 | Fase | Incremento e arquivos principais | Testes e verificações | Hardware e critério de aceite |
 |---|---|---|---|
 | 0 — plano | Somente `docs/IMPLEMENTATION_PLAN.md` | Revisar requisitos, fontes, riscos, escopo e diff; sem teste de aplicação | Sem hardware. Plano contém arquitetura, ordem, testes e aceites; demais arquivos preservados |
-| 1 — bootstrap | Pacote/entrypoint, `config.py`, `pyproject.toml`, requirements, README inicial, licença, assets e ajustes de ignore | `test_bootstrap.py` e `test_config.py`: import e `--help` sem câmera/mouse; CLI segura; configuração inválida. Compileall, pytest, Ruff e instalação limpa | Sem webcam. Pacote importável/instalável, teste mínimo passa; nenhuma captura automática |
-| 2 — geometria e smoothing | `landmarks.py`, `geometry.py`, `smoothing.py` | RED/GREEN: zero, 3-4-5, escala zero, valores não finitos, proporção do frame, limites, clipping, margens inválidas, alpha inválido/limite 1, sequência previsível e reset | Sem hardware. Resultados determinísticos e cobertura ≥80% em cada módulo de lógica pura implementado |
+| 1 — bootstrap | Pacote/entrypoint, `pyproject.toml`, README mínimo e ajustes de ignore | `test_bootstrap.py`: importação silenciosa do pacote/entrypoint sem bibliotecas de hardware; execução com identificação. Compileall, pytest, Ruff e instalação limpa | Sem webcam. Pacote importável/instalável, testes passam e nenhuma captura automática; concluída no escopo autorizado, conforme seção 9 |
+| 2 — geometria e smoothing | `landmarks.py`, `geometry.py`, `smoothing.py`, parâmetros iniciais em `config.py` | RED/GREEN: zero, 3-4-5, escala zero, valores não finitos, proporção do frame, limites, clipping, margens inválidas, alpha inválido/limite 1, sequência previsível, reset e configuração inválida | Sem hardware. Resultados determinísticos e cobertura ≥80% em cada módulo de lógica pura implementado |
 | 3 — tracker e diagnóstico | `hand_tracker.py`, captura em `app.py`, desenho mínimo em `overlay.py`; preparação do modelo | `test_hand_tracker.py`/`test_app.py`: resultados sem mão/com mão, handedness ausente, BGR/RGB, timestamps, modelo ausente/inválido, câmera indisponível, leitura interrompida e limpeza com mocks. Manual: landmarks e saída com q/Esc | Webcam, modelo local e GUI. Mão/landmarks estáveis; câmera/tracker/janelas liberados em saída e exceção; falha de captura termina sem loop silencioso |
 | 4 — dedos e gestos | `gesture_detector.py` e debug básico | Fixtures sintéticas: dedos, polegar, ambas as mãos, rotações, pinça invariável por escala, limiares inclusivos, faixa de histerese, ruído, N frames, abertura, prioridade e ausência de mão | Lógica sem webcam; validação visual exige câmera. Estados e transições previsíveis, sem usar coordenada vertical isolada como regra geral |
 | 5 — cursor virtual | `action_controller.py` em dry-run, mapa/smoothing e alvo no overlay | `test_action_controller.py`: bordas, centro, clipping, margem, suavização, reset e ausência total de chamadas reais; simular tamanho de tela | Webcam/GUI para ergonomia. Alvo virtual suave e limitado; dry-run funciona sem carregar automação |
 | 6 — mouse opt-in | Backend PyAutoGUI, `--control`, clique e cooldown | Backend falso/spy e relógio injetado: clique único mantido por muitos frames, reabertura/novo clique, cooldown antes/no limite/depois, evento descartado, perda/reaquisição, backend indisponível, fail-safe e nenhuma reativação automática | Webcam, display e permissões. Manual: MOVE, pinça única, novo clique após abertura, parada pelo fail-safe e q/Esc; fallback seguro verificável |
 | 7 — overlay e ergonomia | Completar `overlay.py`, informações do modo/gesto/mão | Testar dados apresentados e modo efetivo após fallback com mocks; manual para legibilidade, feedback de pinça e instruções | Webcam/GUI. Uma pessoa entende o modo e a ação; sem excesso de métricas. FPS permanece opcional posterior |
 | 8 — gate de extras | Volume/mídia e demais extras adiados | Nenhum teste ou código de extras durante o MVP; futura fase precisará de plano próprio e testes de backend degradável | Aceite do MVP é pré-requisito; indisponibilidade de mídia não poderá afetar mouse/detecção |
-| 9 — documentação | README completo, arquitetura, testes, plano atualizado e instruções de demo | Reproduzir instalação em ambiente isolado e comandos do README; revisar links, gestos, matemática, histerese, segurança e limites por SO | Instalação sem câmera; execução completa exige hardware. Outra pessoa consegue instalar/executar seguindo só o README |
+| 9 — documentação | README completo, arquitetura, testes, licença, assets, plano atualizado e instruções de demo | Reproduzir instalação em ambiente isolado e comandos do README; revisar links, gestos, matemática, histerese, segurança e limites por SO | Instalação sem câmera; execução completa exige hardware. Outra pessoa consegue instalar/executar seguindo só o README |
 | 10 — QA do MVP | Correções necessárias, revisão final e evidências | Ruff, pytest, cobertura, compileall, revisão Python/segurança/diff e quality-gate estrito se disponível no harness; roteiro manual completo | MVP só pronto com verificações automatizadas e manuais aprovadas. Pendências de hardware serão registradas, nunca tratadas como PASS |
 
 ## 5. Processo ECC e estratégia de testes
@@ -216,10 +216,10 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-Para esta entrega, aceite restrito à Fase 0: documento revisado, plano consistente
-e nenhuma mudança nos arquivos existentes. A próxima fase proposta é **Fase 1 —
-bootstrap**, que aguardará instrução do usuário. O plano não libera testes reais
-de controle do computador nem gravação de demo por conta própria.
+O aceite da Fase 0 foi restrito ao documento. Após o bootstrap autorizado,
+a próxima fase proposta é **Fase 2 — geometria e smoothing**, que aguardará
+instrução do usuário. O plano não libera testes reais de controle do computador
+nem gravação de demo por conta própria.
 
 ## 8. Fontes consultadas e limites da pesquisa
 
@@ -232,3 +232,76 @@ As URLs diretas de guia/setup em `ai.google.dev` falharam na ferramenta de
 consulta; foram usadas fontes oficiais alternativas para o Hand Landmarker.
 Não foi homologada nesta fase uma matriz de versões/plataformas. Revalidar fontes
 e APIs da versão selecionada durante bootstrap e integração, antes de implementar.
+
+## 9. Evidências da Fase 1 — bootstrap
+
+**Estado: concluída no escopo mínimo solicitado pelo usuário. Fase 2 não iniciada.**
+
+Arquivos criados: `pyproject.toml`, `README.md`, `src/hgi/__init__.py`,
+`src/hgi/__main__.py` e `tests/test_bootstrap.py`. Arquivos modificados:
+`.gitignore` e este plano. `AGENTS.md` foi preservado.
+
+Decisões: layout `src`, setuptools, Python >=3.11, versão de desenvolvimento
+`0.1.0.dev0`, runtime sem dependências e extra `dev` com pytest, pytest-cov e Ruff.
+`pyproject.toml` é a declaração equivalente de dependências; não duplicar em
+requirements nesta fase. Ruff usa regras E/F/I/UP/B e alvo py311. A cobertura de
+subprocessos usa `patch = ["subprocess"]`, suportado pela versão de coverage
+exigida pelo pytest-cov >=7. Não foram instaladas ferramentas adicionais.
+
+O entrypoint imprime `HGI — Hand Gesture Interface` e termina. A importação do
+pacote e de `hgi.__main__` é silenciosa; os testes confirmam ausência de imports
+de cv2, MediaPipe, NumPy e PyAutoGUI em um processo sem display. `app.py`, flags
+de hardware e configuração de gestos foram adiados para as fases correspondentes,
+conforme o pedido de bootstrap mínimo. Licença/assets permanecem entregáveis
+posteriores; esta entrega ainda não é o MVP.
+
+| Garantia | Teste | Evidência RED → GREEN |
+|---|---|---|
+| Importação silenciosa, sem bibliotecas de hardware | `test_import_is_quiet_without_hardware_dependencies` | Falhou por ausência do pacote; passou após criar/instalar o HGI; ampliado para importação silenciosa do entrypoint |
+| Execução identifica o projeto e encerra com código zero | `test_module_entrypoint_identifies_project` | Falhou por ausência do módulo; passou com o entrypoint mínimo |
+
+Checkpoint RED local: `6b74a42`, com dois testes executados e falhando por ausência
+da implementação. O checkpoint GREEN reúne a implementação e a evidência abaixo;
+nenhum push foi feito. Não foi necessário refactor de código de produção.
+
+| Comando/verificação executado | Resultado |
+|---|---|
+| `python -m pip install --no-deps --no-build-isolation --no-index -e .` | HGI registrado no Conda ativo; sem rede ou instalação de dependências externas |
+| `python -m pytest -q` | 2 testes passaram após implementação |
+| `python -m pytest -q --cov=hgi --cov-report=term-missing` | 2 passaram; 100% das 4 instruções e dos 2 ramos do bootstrap |
+| `python -m ruff check .` | PASS após corrigir uma linha longa no teste |
+| `python -m ruff format --check .` | PASS |
+| `python -m hgi` | Identificação correta na raiz e em `/tmp`, sem PYTHONPATH manual |
+| `python -m compileall src` | PASS |
+| `python -B -m pip check` | Nenhum requisito quebrado |
+| `python -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir /tmp/hgi-bootstrap-wheels .` | Wheel construída sem downloads |
+| Instalação da wheel com `--no-index --no-deps` em venv temporário | Execução com `python -I -m hgi` e pip check passaram, sem pacotes de visão/automação |
+| Revisão Python e segurança | Sem CRITICAL/HIGH; função pública tipada, sem imports de hardware, captura, rede, exceções ocultadas ou segredos nos arquivos alterados |
+| `git diff --check` e revisão de arquivos novos | Sem problemas de whitespace ou alterações fora do escopo |
+
+O `verification-loop` cobriu build, lint, testes/cobertura, segurança e diff.
+Type checker dedicado não foi configurado; a interface mínima foi revisada
+manualmente. A cobertura mede somente o bootstrap, não a lógica futura do HGI.
+
+Problemas encontrados e situação final:
+
+- OpenCV: `opencv-python` e `opencv-contrib-python` 5.0.0.93 continuam instalados;
+  nenhuma variante headless. MediaPipe 1.0.1 depende de contrib. A correção futura
+  proposta é manter apenas contrib e reparar seus arquivos após remover a outra
+  distribuição, com autorização específica; nada foi removido/reinstalado agora.
+- As versões de todas as dependências preexistentes foram conferidas e preservadas.
+  Somente o pacote local HGI foi instalado. Não houve importação real de `cv2`
+  para homologar o ambiente de visão.
+- A primeira checagem Ruff encontrou E501, corrigido sem desativar a regra.
+  Avisos iniciais de cobertura do processo pai foram resolvidos incluindo a
+  garantia de importação silenciosa do entrypoint no teste; nenhum aviso suprimido.
+- pip informou cache indisponível no sandbox, mas desabilitou esse cache e
+  concluiu as operações; não houve mudança de permissões.
+- Testes de hardware e permissões não se aplicam ao bootstrap. A webcam segue
+  não homologada, e o conflito OpenCV deve ser resolvido antes da Fase 3.
+
+Referências de configuração:
+[setuptools](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html),
+[pytest](https://docs.pytest.org/en/stable/reference/customize.html),
+[Ruff](https://docs.astral.sh/ruff/configuration/) e
+[cobertura de subprocessos](https://pytest-cov.readthedocs.io/en/latest/subprocess-support.html).

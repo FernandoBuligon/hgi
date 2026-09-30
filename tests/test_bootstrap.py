@@ -2,22 +2,29 @@
 
 import subprocess
 import sys
+from importlib import import_module
 
 import pytest
 
 
 def test_import_is_quiet_without_hardware_dependencies(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Importing the package must be quiet and safe in a headless environment."""
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    import_module("hgi.__main__")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import hgi; "
-            "assert not {'cv2', 'mediapipe', 'numpy', 'pyautogui'} & sys.modules.keys()",
+            "import sys; import hgi.__main__; "
+            "assert not {'cv2', 'mediapipe', 'numpy', 'pyautogui'} "
+            "& sys.modules.keys()",
         ],
         capture_output=True,
         text=True,
