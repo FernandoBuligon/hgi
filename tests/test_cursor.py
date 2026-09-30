@@ -80,6 +80,7 @@ def test_cursor_layer_only_imports_standard_library_and_pure_hgi_modules() -> No
         "hgi.gesture_detector",
         "hgi.hand_landmarks",
         "hgi.smoothing",
+        "hgi.temporal",
     }
     for module in (hgi.cursor, hgi.cursor_controller):
         tree = ast.parse(inspect.getsource(module))

@@ -11,6 +11,22 @@ from hgi.finger_state import GestureConfig
 from hgi.geometry import Region2D
 from hgi.gesture_detector import Gesture, GestureDetector
 from hgi.hand_landmarks import DetectedHand, HandLandmark
+from hgi.temporal import TemporalConfig, TemporalGestureFilter
+
+
+def enabled_controller(config, *, sink=None, detector=None) -> CursorController:
+    """Keep Phase 5 mapping tests immediate; timing is covered in its own suite."""
+    temporal = TemporalGestureFilter(
+        TemporalConfig(
+            stabilization_seconds=0, click_cooldown_seconds=0, tracking_grace_seconds=0
+        ),
+        clock=lambda: 0.0,
+    )
+    controller = CursorController(
+        config, sink=sink, detector=detector, temporal=temporal
+    )
+    controller.enable()
+    return controller
 
 
 def at_indicator(hand: DetectedHand, x: float, y: float) -> DetectedHand:
@@ -34,7 +50,7 @@ def pinched(hand: DetectedHand) -> DetectedHand:
 
 @pytest.mark.parametrize("width,height", [(1920, 1080), (801, 601), (1, 1)])
 def test_point_center_uses_supplied_screen_dimensions(hand_factory, width, height):
-    controller = CursorController(CursorConfig(width, height))
+    controller = enabled_controller(CursorConfig(width, height))
     command = controller.update(at_indicator(hand_factory("index"), 0.5, 0.5))
     assert command == CursorCommand(
         CursorAction.MOVE, (width - 1) / 2, (height - 1) / 2, Gesture.POINT
@@ -56,13 +72,15 @@ def test_active_region_reaches_edges_and_clips_predictions(
     config = CursorConfig(
         1001, 501, active_region=Region2D(0.2, 0.3, 0.8, 0.7), mirror_x=False
     )
-    command = CursorController(config).update(at_indicator(hand_factory("index"), x, y))
+    command = enabled_controller(config).update(
+        at_indicator(hand_factory("index"), x, y)
+    )
     assert (command.x, command.y) == pytest.approx(expected)
 
 
 def test_raw_camera_motion_to_user_right_moves_virtual_cursor_right(hand_factory):
     """Facing an unmirrored camera, physical right decreases raw image X."""
-    controller = CursorController(CursorConfig(1001, 501, smoothing_alpha=1.0))
+    controller = enabled_controller(CursorConfig(1001, 501, smoothing_alpha=1.0))
     before = controller.update(at_indicator(hand_factory("index"), 0.7, 0.5))
     after = controller.update(at_indicator(hand_factory("index"), 0.3, 0.5))
     assert (before.x, after.x) == pytest.approx((250, 750))
@@ -70,13 +88,13 @@ def test_raw_camera_motion_to_user_right_moves_virtual_cursor_right(hand_factory
 
 
 def test_already_mirrored_input_can_disable_second_reflection(hand_factory):
-    controller = CursorController(CursorConfig(1001, 501, mirror_x=False))
+    controller = enabled_controller(CursorConfig(1001, 501, mirror_x=False))
     command = controller.update(at_indicator(hand_factory("index"), 0.7, 0.5))
     assert command.x == pytest.approx(750)
 
 
 def test_point_sequence_reuses_ema_in_both_axes(hand_factory):
-    controller = CursorController(
+    controller = enabled_controller(
         CursorConfig(1001, 501, mirror_x=False, smoothing_alpha=0.25)
     )
     pose = hand_factory("index")
@@ -100,7 +118,7 @@ def test_point_sequence_reuses_ema_in_both_axes(hand_factory):
 )
 def test_inactivity_emits_none_and_discards_old_motion(hand_factory, pose, gesture):
     sink = DryRunCursorSink()
-    controller = CursorController(CursorConfig(1001, 501, mirror_x=False), sink=sink)
+    controller = enabled_controller(CursorConfig(1001, 501, mirror_x=False), sink=sink)
     controller.update(at_indicator(hand_factory("index"), 0.1, 0.1))
     idle = controller.update(None if pose is None else hand_factory(*pose))
     resumed = controller.update(at_indicator(hand_factory("index"), 0.9, 0.9))
@@ -111,7 +129,7 @@ def test_inactivity_emits_none_and_discards_old_motion(hand_factory, pose, gestu
 
 def test_pinch_clicks_last_virtual_position_once_and_does_not_move(hand_factory):
     sink = DryRunCursorSink()
-    controller = CursorController(CursorConfig(1001, 501), sink=sink)
+    controller = enabled_controller(CursorConfig(1001, 501), sink=sink)
     moved = controller.update(at_indicator(hand_factory("index"), 0.3, 0.4))
     pinch = pinched(at_indicator(hand_factory("index"), 0.8, 0.8))
     click = controller.update(pinch)
@@ -130,14 +148,15 @@ def test_pinch_clicks_last_virtual_position_once_and_does_not_move(hand_factory)
 
 
 def test_initial_pinch_click_uses_mapped_indicator_without_a_move(hand_factory):
-    controller = CursorController(CursorConfig(1001, 501))
+    controller = enabled_controller(CursorConfig(1001, 501))
+    controller.update(hand_factory())  # Confirm release without any MOVE.
     command = controller.update(pinched(at_indicator(hand_factory("index"), 0.3, 0.5)))
     assert command.action is CursorAction.CLICK
     assert (command.x, command.y) == pytest.approx((750, 250))
 
 
 def test_pinch_preserves_ema_for_point_resume(hand_factory):
-    controller = CursorController(
+    controller = enabled_controller(
         CursorConfig(1001, 501, mirror_x=False, smoothing_alpha=0.5)
     )
     pose = hand_factory("index")
@@ -151,42 +170,51 @@ def test_reset_clears_position_ema_and_pinch_edge_but_keeps_output_history(
     hand_factory,
 ):
     sink = DryRunCursorSink()
-    controller = CursorController(CursorConfig(1001, 501, mirror_x=False), sink=sink)
+    controller = enabled_controller(CursorConfig(1001, 501, mirror_x=False), sink=sink)
     pose = hand_factory("index")
     controller.update(at_indicator(pose, 0.1, 0.1))
     controller.update(pinched(pose))
     controller.reset()
+    controller.enable()
+    controller.update(hand_factory())
     click = controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
     assert click.action is CursorAction.CLICK
     assert (click.x, click.y) == pytest.approx((1000, 500))
     controller.reset()
+    controller.enable()
     assert controller.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
-    assert len(sink.commands) == 4
+    assert len(sink.commands) == 5
 
 
-def test_tracking_loss_rearms_logical_pinch_edge_as_documented(hand_factory):
-    controller = CursorController(CursorConfig(1001, 501))
+def test_tracking_loss_requires_release_instead_of_rearming_a_closed_pinch(
+    hand_factory,
+):
+    controller = enabled_controller(CursorConfig(1001, 501))
     hand = pinched(hand_factory("index"))
+    controller.update(hand_factory())
     assert controller.update(hand).action is CursorAction.CLICK
     controller.update(None)
+    assert controller.update(hand).action is CursorAction.NONE
+    controller.update(hand_factory())
     assert controller.update(hand).action is CursorAction.CLICK
 
 
 def test_invalid_geometry_propagates_and_clears_previous_motion(hand_factory):
-    controller = CursorController(CursorConfig(1001, 501, mirror_x=False))
+    controller = enabled_controller(CursorConfig(1001, 501, mirror_x=False))
     pose = hand_factory("index")
     controller.update(at_indicator(pose, 0.1, 0.1))
     invalid = replace(pose, landmarks=(pose.landmarks[0],) * 21)
     with pytest.raises(ValueError, match="reference"):
         controller.update(invalid)
+    controller.enable()
     assert controller.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
 
 
-def test_recognition_thresholds_can_be_injected_without_mocking_logic(hand_factory):
-    pose = hand_factory("index")
-    detector = GestureDetector(GestureConfig(pinch_threshold=10.0))
-    controller = CursorController(CursorConfig(1001, 501), detector=detector)
-    assert controller.update(pose).action is CursorAction.CLICK
+def test_detector_geometry_config_can_be_injected_without_mocking_logic(hand_factory):
+    pose = hand_factory("index", aspect_ratio=2)
+    detector = GestureDetector(GestureConfig(image_aspect_ratio=2))
+    controller = enabled_controller(CursorConfig(1001, 501), detector=detector)
+    assert controller.update(pose).action is CursorAction.MOVE
 
 
 @pytest.mark.parametrize(
@@ -222,7 +250,7 @@ def test_controllers_do_not_share_smoothing_state(
     hand_factory: Callable[..., DetectedHand],
 ):
     config = CursorConfig(1001, 501, mirror_x=False)
-    first, second = CursorController(config), CursorController(config)
+    first, second = enabled_controller(config), enabled_controller(config)
     pose = hand_factory("index")
     first.update(at_indicator(pose, 0.1, 0.1))
     assert second.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)

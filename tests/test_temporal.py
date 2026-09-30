@@ -116,6 +116,33 @@ def test_initial_closed_pinch_requires_confirmed_open_before_click(fake_clock):
     assert filter_.update(observed(ratio=0.2)).click
 
 
+def test_custom_hysteresis_uses_measurement_instead_of_the_raw_label(fake_clock):
+    config = TemporalConfig(
+        stabilization_seconds=0,
+        enter_pinch_threshold=0.1,
+        exit_pinch_threshold=0.3,
+    )
+    filter_ = TemporalGestureFilter(config, clock=fake_clock)
+    sample = observed(ratio=0.2)
+    assert sample.raw is Gesture.PINCH
+    assert filter_.update(sample).move
+    filter_.update(observed(ratio=0.3))
+    assert filter_.update(observed(ratio=0.1)).click
+
+
+def test_one_clock_read_per_temporal_update() -> None:
+    calls = []
+
+    def clock() -> float:
+        calls.append(1)
+        return 0.0
+
+    filter_ = TemporalGestureFilter(clock=clock)
+    filter_.update(observed())
+    filter_.update(ABSENT)
+    assert len(calls) == 2
+
+
 def test_short_tracking_gap_preserves_stable_pinch_without_emitting_or_rearming(
     fake_clock,
 ):
