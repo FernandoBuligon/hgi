@@ -97,6 +97,16 @@ def test_straight_chain_pointing_toward_wrist_is_not_extended(
     assert not detect_fingers(replace(hand, landmarks=tuple(points))).index
 
 
+def test_thumb_spread_overflow_is_rejected(
+    hand_factory: Callable[..., DetectedHand],
+) -> None:
+    hand = hand_factory()
+    points = list(hand.landmarks)
+    points[HandLandmark.THUMB_TIP] = NormalizedLandmark(1e308, 0.5, 0)
+    with pytest.raises(ValueError, match="finite"):
+        detect_fingers(replace(hand, landmarks=tuple(points)))
+
+
 def test_invalid_hand_size_is_rejected_by_internal_type(
     hand_factory: Callable[..., DetectedHand],
 ) -> None:
