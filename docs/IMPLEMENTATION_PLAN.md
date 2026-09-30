@@ -8,8 +8,9 @@ overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
 posteriormente as **Fases 1 a 5**, registradas nas seções 9 a 13, e agora somente
-a **Fase 6 — proteção temporal e opt-in lógico em dry-run**, com evidências na seção 14.
-O usuário adiou explicitamente mouse real/PyAutoGUI. As fases 7–10 continuam
+a **Fase 7 — integração visual com webcam, overlay e pipeline dry-run**, com
+plano e evidências na seção 15. A Fase 6 está registrada na seção 14.
+O usuário adiou explicitamente mouse real/PyAutoGUI. As fases 8–10 continuam
 propostas, sem autorização. Na Fase 3, o modelo foi adquirido
 explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
 automação, gravação de frames ou publicação.
@@ -947,7 +948,62 @@ e limpa cooldown, exigindo novamente abertura/estabilização. Não há teste ma
 de câmera/ergonomia ou fail-safe real. Duplicidade OpenCV preservada, sem impacto
 na camada Python desta fase.
 
-Próxima fase recomendada: **Fase 7 — integração visual/overlay em dry-run**,
-após nova autorização e plano do diagnóstico/captura correspondente. O backend
+Próxima fase recomendada ao encerrar a Fase 6: **Fase 7 — integração visual/overlay em dry-run**,
+autorizada posteriormente, com plano na seção 15. O backend
 real originalmente previsto para a Fase 6 permanece adiado e exige autorização
 e revisão próprias antes do aceite final do MVP. Nenhuma etapa posterior foi executada.
+
+## 15. Fase 7 — plano e evidências da integração visual dry-run
+
+Autorização: pedido explícito do usuário nesta sessão; webcam/GUI permitidas,
+somente intenções virtuais. Nenhum backend real, download de modelo em runtime,
+consulta de monitor, persistência ou ação extra. Base limpa `c55beb1`, branch
+`mais`. Leitura integral de AGENTS.md, plano, arquitetura, MODELS.md e src/hgi.
+
+### Plano curto (antes do código)
+
+1. Registrar requisitos/versões OpenCV, preservar backup reversível, remover
+   somente opencv-python e validar pip check/import. Reverter se inconsistente.
+2. TDD de Camera com fake OpenCV: abrir, ler BGR uint8, dimensões reais, falhas,
+   liberação em exceções. Espelhar somente na integração, sem mudar HandTracker.
+3. TDD de overlay e pipeline sintético: seleção explícita, BGR→RGB, aspecto real,
+   POINT/PINCH temporais, opt-in/teclas e saída limitada em memória.
+4. Implementar demo dedicada, modelo local validado, FPS observável e limpeza
+   de câmera/tracker/janelas. Começar DISABLED, E/D/R/Q/Esc via waitKey.
+5. Revisar Python/segurança, executar verificações solicitadas, documentar e
+   tentar smoke manual somente se houver /dev/video*. Não avançar à Fase 8.
+
+Padrões reutilizados: dataclasses/configurações imutáveis, context manager de
+HandTracker, exceções com causa, fixture hand_factory e clock falso, pytest/Ruff.
+Riscos: sobreposição de arquivos cv2, display/câmera indisponíveis, IMAGE sem
+tracking otimizado, proporção real variável, ausência de identidade persistente
+e histórico ilimitado do sink atual. Mudanças pequenas nessas fronteiras devem
+preservar contratos anteriores. Confiança disponível mede Left/Right, portanto
+a seleção usará maior handedness_score (empate/ausência: primeira mão), sem
+afirmar que é confiança de detecção. A demo espelhará antes da inferência e usará
+mirror_x=False para coerência visual. Margens/thresholds permanecerão iguais.
+
+ECC aplicado: /plan inline (autorização já fornecida), documentation-lookup
+com documentação oficial por web porque Context7 não está exposto, tdd-workflow,
+python-reviewer, security-review e verification-loop.
+
+### Inventário OpenCV anterior à alteração
+
+Python padrão do shell é Conda base 3.13.5, distinto do projeto. Todas as
+operações desta fase usam `/home/syl/miniconda3/envs/hgi/bin/python` (3.11.16).
+`pip show mediapipe/opencv-python/opencv-contrib-python`, `pip freeze`, requisitos
+de todas as distribuições e `pip check` foram inspecionados no ambiente hgi.
+MediaPipe 1.0.1 requer opencv-contrib-python; nenhum pacote instalado exige
+opencv-python. Ambas as distribuições OpenCV são 5.0.0.93; cv2 efetivo 5.0.0,
+GUI QT5. Nenhuma variante headless. pip check inicial passou.
+Demais versões foram registradas em `/tmp/hgi-phase7-packages-before.json`;
+213 arquivos das duas distribuições foram preservados em
+`/tmp/hgi-phase7-opencv-before.tar.gz` para reversão exata se necessário.
+Decisão: manter contrib com GUI. Nenhuma outra dependência será alterada.
+`ls -l /dev/video*`: nenhum dispositivo visível; smoke humano pendente.
+
+Remoção inicial: `pip uninstall -y opencv-python` passou; `pip check` também,
+mas `import cv2; print(cv2.__version__)` falhou com AttributeError: o desinstalador
+removeu arquivos compartilhados. **Reversão executada antes de prosseguir**:
+backup restaurado, cv2 5.0.0 e pip check novamente aprovados. A correção requer
+repor contrib na mesma versão sem dependências, após nova remoção de python.
