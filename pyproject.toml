@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
+control = ["PyAutoGUI==0.9.54"]
 vision = [
     "mediapipe==1.0.1",
     "numpy>=2.4,<3",

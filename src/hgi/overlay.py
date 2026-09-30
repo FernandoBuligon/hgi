@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from hgi.camera import validate_bgr_frame
 from hgi.click_feedback import ClickFeedbackState
-from hgi.cursor import ControlState, CursorCommand
+from hgi.cursor import ControlState, CursorCommand, CursorMode
 from hgi.cursor_controller import CursorConfig
 from hgi.geometry import Point2D, map_camera_to_screen, normalized_to_pixels
 from hgi.gesture_detector import Gesture, GestureObservation
@@ -64,6 +64,7 @@ HAND_CONNECTIONS = tuple(
 _GREEN = (80, 220, 80)
 _YELLOW = (0, 220, 255)
 _WHITE = (255, 255, 255)
+_REAL_COLOR = (80, 80, 255)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,7 @@ class OverlayState:
     temporal: TemporalStatus
     fps: float = 0.0
     click_feedback: ClickFeedbackState = ClickFeedbackState()
+    mode: CursorMode = CursorMode.DRY_RUN
 
 
 def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
@@ -91,7 +93,7 @@ def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
     cursor = "--" if position is None else f"{position.x:.0f}, {position.y:.0f}"
     candidate = temporal.candidate.value if temporal.candidate else "--"
     lines = (
-        f"HGI | DRY-RUN | CONTROL: {state.control.value}",
+        f"HGI | {state.mode.value} | CONTROL: {state.control.value}",
         f"Hand: {hand.handedness or '--' if hand else '--'} | "
         f"Confidence (Left/Right): {confidence}",
         f"RAW: {state.observation.raw.value} | STABLE: {temporal.stable.value}",
@@ -153,7 +155,11 @@ def _draw_hand(frame: NDArray[np.uint8], state: OverlayState) -> None:
 
 
 def _text(
-    frame: NDArray[np.uint8], text: str, location: tuple[int, int], scale: float
+    frame: NDArray[np.uint8],
+    text: str,
+    location: tuple[int, int],
+    scale: float,
+    color: tuple[int, int, int] = _WHITE,
 ) -> None:
     (width, height), baseline = cv2.getTextSize(
         text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1
@@ -172,7 +178,7 @@ def _text(
         location,
         cv2.FONT_HERSHEY_SIMPLEX,
         scale,
-        _WHITE,
+        color,
         1,
         cv2.LINE_AA,
     )
@@ -197,7 +203,12 @@ def draw_overlay(
     scale = max(0.25, min(width / 640, height / 480, 1.0) * 0.45)
     spacing = max(13, round(22 * min(width / 640, height / 480, 1.0)))
     for index, line in enumerate(overlay_lines(state, config)):
-        _text(frame, line, (8, 20 + index * spacing), scale)
+        color = (
+            _REAL_COLOR
+            if index == 0 and state.mode is CursorMode.REAL_CONTROL
+            else _WHITE
+        )
+        _text(frame, line, (8, 20 + index * spacing), scale, color)
     _text(frame, "ACTIVE AREA = full logical screen", (start[0] + 4, end[1] - 8), scale)
     _text(
         frame, "E enable | D disable | R reset | Q / Esc quit", (8, height - 10), scale

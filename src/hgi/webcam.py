@@ -1,4 +1,4 @@
-"""Visual webcam integration, exclusively dry-run; no automation backend."""
+"""Visual integration with default dry-run and explicitly selected real output."""
 
 from __future__ import annotations
 
@@ -24,9 +24,8 @@ from hgi.gesture_detector import GestureDetector
 from hgi.hand_landmarks import DetectedHand
 from hgi.hand_tracker import HandTracker
 from hgi.overlay import OverlayState, draw_overlay
+from hgi.real_cursor import RealCursorSink
 from hgi.temporal import TemporalGestureFilter
-
-WINDOW_NAME = "HGI - DRY-RUN"
 
 
 class DisplayError(RuntimeError):
@@ -43,24 +42,51 @@ class FrameTracker(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class DemoConfig:
-    """Requested camera dimensions and a logical screen, without monitor lookup."""
+    """Camera settings and opt-in output; None dimensions select mode defaults."""
 
     model_path: Path = Path("models/hand_landmarker.task")
     camera_index: int = 0
     frame_width: int = 640
     frame_height: int = 480
-    screen_width: int = 1920
-    screen_height: int = 1080
+    screen_width: int | None = None
+    screen_height: int | None = None
+    real_control: bool = False
 
     def __post_init__(self) -> None:
         normalized_to_pixels(Point2D(0, 0), self.frame_width, self.frame_height)
-        normalized_to_pixels(Point2D(0, 0), self.screen_width, self.screen_height)
+        if (self.screen_width is None) != (self.screen_height is None):
+            raise ValueError("Supply both screen dimensions or neither")
+        if self.screen_width is not None and self.screen_height is not None:
+            normalized_to_pixels(Point2D(0, 0), self.screen_width, self.screen_height)
+        if not isinstance(self.real_control, bool):
+            raise ValueError("real_control must be an explicit boolean")
         if (
             isinstance(self.camera_index, bool)
             or not isinstance(self.camera_index, int)
             or self.camera_index < 0
         ):
             raise ValueError("Camera index must be a nonnegative integer")
+
+
+def configure_output(
+    config: DemoConfig,
+) -> tuple[CursorConfig, DryRunCursorSink | RealCursorSink]:
+    """Choose output before capture; only real opt-in queries the monitor.
+
+    Paired overrides define a top-left rectangle within the detected screen.
+    Real startup errors propagate; never silently substitute a different mode.
+    """
+    sink: DryRunCursorSink | RealCursorSink
+    if config.real_control:
+        sink = RealCursorSink(
+            screen_width=config.screen_width, screen_height=config.screen_height
+        )
+        width, height = sink.screen_width, sink.screen_height
+    else:
+        sink = DryRunCursorSink(max_history=1)
+        width = config.screen_width if config.screen_width is not None else 1920
+        height = config.screen_height if config.screen_height is not None else 1080
+    return CursorConfig(width, height, mirror_x=False), sink
 
 
 def select_hand(hands: tuple[DetectedHand, ...]) -> DetectedHand | None:
@@ -91,6 +117,7 @@ class WebcamPipeline:
         tracker: FrameTracker,
         config: CursorConfig,
         *,
+        sink: DryRunCursorSink | RealCursorSink | None = None,
         clock: Callable[[], float] = monotonic,
         ui_clock: Callable[[], float] = monotonic,
     ) -> None:
@@ -101,7 +128,7 @@ class WebcamPipeline:
         self._clock = clock
         self._click_feedback = ClickFeedback(clock=ui_clock)
         self._shape: tuple[int, int] | None = None
-        self._sink = DryRunCursorSink(max_history=1)
+        self._sink = sink if sink is not None else DryRunCursorSink(max_history=1)
         self._configure(1.0)
 
     def _configure(self, aspect: float) -> None:
@@ -116,7 +143,7 @@ class WebcamPipeline:
 
     @property
     def controller(self) -> CursorController:
-        """Current dry-run session for explicit enable/disable/reset commands."""
+        """Current initially disabled session for explicit window controls."""
         return self._controller
 
     def process(
@@ -150,9 +177,10 @@ class WebcamPipeline:
                 self._temporal.status,
                 fps,
                 self._click_feedback.update(command.action),
+                self._sink.mode,
             )
             return draw_overlay(bgr, state, self._config), state
-        except Exception:
+        except BaseException:
             # Cleanup only; do not turn broken inference into a missing hand.
             self._controller.disable()
             raise
@@ -196,6 +224,8 @@ def run_webcam(config: DemoConfig) -> None:
         )
     pipeline: WebcamPipeline | None = None
     try:
+        cursor_config, sink = configure_output(config)
+        window_name = f"HGI - {sink.mode.value}"
         with (
             Camera(
                 config.camera_index,
@@ -206,9 +236,10 @@ def run_webcam(config: DemoConfig) -> None:
         ):
             pipeline = WebcamPipeline(
                 tracker,
-                CursorConfig(config.screen_width, config.screen_height, mirror_x=False),
+                cursor_config,
+                sink=sink,
             )
-            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+            cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
             previous, fps = monotonic(), 0.0
             while True:
                 frame, _ = pipeline.process(camera.read(), fps=fps)
@@ -216,10 +247,10 @@ def run_webcam(config: DemoConfig) -> None:
                 elapsed = now - previous
                 fps = 1.0 / elapsed if elapsed > 0 else 0.0
                 previous = now
-                cv2.imshow(WINDOW_NAME, frame)
+                cv2.imshow(window_name, frame)
                 if pipeline.handle_key(cv2.waitKey(1)):
                     break
-                if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                     break
     finally:
         if pipeline is not None:
