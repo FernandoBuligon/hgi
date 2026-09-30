@@ -1,6 +1,8 @@
 """Double opt-in, native-boundary cleanup and visible output mode with fakes."""
 
 import runpy
+import subprocess
+import sys
 from unittest.mock import Mock
 
 import cv2
@@ -14,6 +16,47 @@ from hgi.cursor import ControlState, CursorAction, CursorMode, DryRunCursorSink
 from hgi.overlay import overlay_lines
 from hgi.real_cursor import RealCursorError, RealCursorSink
 from hgi.webcam import DemoConfig, WebcamPipeline, configure_output, run_webcam
+
+
+def test_default_import_and_enabled_dry_run_never_load_pyautogui():
+    script = """
+import importlib.abc
+import sys
+class BlockAutomation(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'pyautogui', 'mouseinfo', 'pyperclip'}:
+            raise AssertionError('Unexpected automation import: ' + fullname)
+sys.meta_path.insert(0, BlockAutomation())
+from types import SimpleNamespace
+import numpy as np
+from hgi.webcam import DemoConfig, WebcamPipeline, configure_output
+config, sink = configure_output(DemoConfig())
+pipeline = WebcamPipeline(SimpleNamespace(process=lambda rgb: ()), config, sink=sink)
+frame = np.zeros((120,160,3), np.uint8)
+pipeline.process(frame)
+pipeline.handle_key(ord('e'))
+pipeline.process(frame)
+assert sink.mode.value == 'DRY-RUN'
+assert not {'pyautogui', 'mouseinfo', 'pyperclip'} & sys.modules.keys()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_window_shutdown_error_without_primary_fault_propagates(monkeypatch):
+    from hgi.webcam import _close_windows
+
+    error = cv2.error("shutdown")
+    monkeypatch.setattr(cv2, "destroyAllWindows", Mock(side_effect=error))
+    with pytest.raises(cv2.error) as caught:
+        _close_windows()
+    assert caught.value is error
 
 
 def test_default_output_does_not_construct_backend_or_query_monitor(monkeypatch):

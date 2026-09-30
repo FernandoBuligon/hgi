@@ -106,7 +106,7 @@ def select_hand(hands: tuple[DetectedHand, ...]) -> DetectedHand | None:
 
 
 class WebcamPipeline:
-    """Mirror BGR, convert to RGB, infer, update virtual output and draw BGR.
+    """Mirror BGR, convert to RGB, infer, update the selected sink and draw BGR.
 
     Default controller remains DISABLED. The same measured observation feeds
     controller and overlay when enabled. Disabled sessions measure raw gestures

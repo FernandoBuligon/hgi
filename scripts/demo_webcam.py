@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Parse settings and report known setup/runtime errors with nonzero exit."""
+def _parser() -> argparse.ArgumentParser:
+    """Describe explicit output opt-in without importing hardware libraries."""
     parser = argparse.ArgumentParser(description="HGI webcam - DRY-RUN by default")
     parser.add_argument(
         "--model", type=Path, default=Path("models/hand_landmarker.task")
@@ -21,6 +21,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="select real mouse output; session still starts DISABLED (E enables)",
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse settings and report known setup/runtime errors with nonzero exit."""
+    parser = _parser()
     args = parser.parse_args(argv)
     if (args.screen_width is None) != (args.screen_height is None):
         parser.error("Supply both --screen-width and --screen-height or neither")
