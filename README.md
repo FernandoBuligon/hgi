@@ -1,9 +1,9 @@
 # HGI — Hand Gesture Interface
 
 Projeto local de visão computacional para interpretar gestos da mão.
-**Fase concluída: adaptador HandTracker / MediaPipe.** O comando abaixo apenas
+**Fase concluída: interpretação geométrica de dedos e gestos.** O comando abaixo apenas
 identifica o projeto. O tracker processa frames RGB fornecidos pelo chamador;
-captura de webcam, gestos e controle do mouse ainda não estão integrados.
+captura de webcam, pipeline contínuo e controle do mouse ainda não estão integrados.
 
 Requer Python **3.11 ou superior**. O bootstrap usa somente a biblioteca padrão.
 Os módulos matemáticos também usam apenas Python, com dimensões fornecidas pelo chamador.
@@ -85,5 +85,28 @@ síncrono e não exige timestamps. Os resultados contêm 21 pontos XYZ próprios
 HGI. A ordem de cores depende do chamador; um array BGR não pode ser identificado
 automaticamente pelo formato. Não há loop de webcam nem teste real de mão nesta sessão.
 
-Veja [os contratos e a arquitetura](docs/ARCHITECTURE.md) e
-[o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md). A Fase 4 não foi iniciada.
+## Reconhecimento geométrico disponível
+
+Com uma variável `hand` contendo um `DetectedHand` interno, sem importar
+bibliotecas de visão:
+
+```python
+from hgi.finger_state import GestureConfig, detect_fingers, pinch_ratio
+from hgi.gesture_detector import GestureDetector
+
+config = GestureConfig(pinch_threshold=0.25, image_aspect_ratio=640 / 480)
+detector = GestureDetector(config)
+state = detect_fingers(hand, config)
+ratio = pinch_ratio(hand, config)
+gesture = detector.detect(hand)
+```
+
+São reconhecidos UNKNOWN, POINT, PINCH, OPEN_HAND e FIST. PINCH tem prioridade,
+com distância polegar→indicador dividida pela referência wrist→middle MCP.
+As heurísticas são determinísticas por mão, sem debounce, histerese ou ações.
+O limiar inicial precisa de calibração com mãos reais; não é reconhecimento de
+linguagem de sinais. Proporção da imagem e limites geométricos estão documentados
+em [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Veja [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
+A Fase 5 não foi iniciada.

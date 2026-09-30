@@ -7,9 +7,9 @@ de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
 Este documento foi criado na **Fase 0**, sem implementação. O usuário autorizou
-posteriormente as **Fases 1 e 2**, registradas nas seções 9 e 10, e agora somente
-a **Fase 3 — adaptador HandTracker**, com evidências na seção 11. As fases 4–10
-continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
+posteriormente as **Fases 1 a 3**, registradas nas seções 9 a 11, e agora somente
+a **Fase 4 — dedos e gestos determinísticos**, com evidências na seção 12.
+As fases 5–10 continuam propostas, sem autorização. Na Fase 3, o modelo foi adquirido
 explicitamente em `/tmp` para inferência sintética; não houve abertura de webcam,
 automação, gravação de frames ou publicação.
 
@@ -69,7 +69,8 @@ flowchart LR
 | `hand_landmarks.py` | Representação própria dos 21 pontos XYZ, índices oficiais e handedness/score opcionais |
 | `geometry.py` | Distâncias, normalização por escala, mapeamento e clipping |
 | `hand_tracker.py` | Adaptar frames e resultados MediaPipe; nunca executar ações |
-| `gesture_detector.py` | Dedos, MOVE/IDLE/PINCH, confirmação e histerese |
+| `finger_state.py` | Configuração imutável, dedos nomeados e medidas geométricas da mão |
+| `gesture_detector.py` | POINT/PINCH/OPEN_HAND/FIST/UNKNOWN por chamada; temporalidade adiada |
 | `smoothing.py` | Média exponencial e reset, sem dependência de hardware |
 | `action_controller.py` | Alvo virtual, backend de mouse injetável e cooldown |
 | `overlay.py` | Landmarks, mão, gesto, modo, alvo virtual e feedback de pinça |
@@ -100,9 +101,11 @@ Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfi
   entrada nesta fase é estritamente RGB. Preservar coordenadas
   normalizadas e corrigir a proporção largura/altura no cálculo de distâncias
   2D, para não distorcer a pinça em frames retangulares.
-- Avaliar extensão dos dedos por ângulos e relações articulares; tratar o polegar
-  separadamente. Validar rotações no plano e ambas as mãos; oclusão e rotação
-  fora do plano continuam limitações a documentar.
+- Na Fase 4, avaliar extensão por razão chord/path da cadeia articular e distância
+  relativa ao punho; tratar o polegar separadamente por abertura da base do indicador.
+  A proposta de ângulos individuais foi simplificada; relações/distâncias 2D
+  favorecem leitura e testes. Rotações no plano e ambas as mãos têm testes;
+  oclusão e rotação fora do plano permanecem limitações.
 - Propor referência de palma entre wrist e middle MCP. Rejeitar escala degenerada
   e pontos não finitos; não substituir resultados inválidos por gestos válidos.
 - Mapear indicador da área útil da câmera para `0..largura-1` e `0..altura-1` da
@@ -133,7 +136,7 @@ fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendent
 | 1 — bootstrap | Pacote/entrypoint, `pyproject.toml`, README mínimo e ajustes de ignore | `test_bootstrap.py`: importação silenciosa do pacote/entrypoint sem bibliotecas de hardware; execução com identificação. Compileall, pytest, Ruff e instalação limpa | Sem webcam. Pacote importável/instalável, testes passam e nenhuma captura automática; concluída no escopo autorizado, conforme seção 9 |
 | 2 — geometria e smoothing | `geometry.py`, `smoothing.py`; pontos/regiões e parâmetros passados explicitamente, sem arquivo de configuração global | RED/GREEN: zero, 3-4-5, referência inválida, valores não finitos, dimensões fornecidas, limites, clipping, regiões inválidas, espelhamento, alpha inválido/limite 1, sequência previsível, reset e regressões de arredondamento | Concluída sem hardware: 142 testes novos, 144 no total e 100% de linhas/branches nos novos módulos; evidências na seção 10 |
 | 3 — adaptador HandTracker | `hand_tracker.py`, `hand_landmarks.py`; modelo local documentado, sem loop de captura/overlay | TDD: conversão, handedness, nenhuma mão, 21 pontos, frame RGB, configuração, erros e limpeza; smoke com modelo real e arrays sintéticos | Concluída no escopo atualizado pelo usuário, conforme seção 11. Sem webcam/GUI obrigatórias; tracking humano e diagnóstico visual manual permanecem pendentes |
-| 4 — dedos e gestos | `gesture_detector.py` e debug básico | Fixtures sintéticas: dedos, polegar, ambas as mãos, rotações, pinça invariável por escala, limiares inclusivos, faixa de histerese, ruído, N frames, abertura, prioridade e ausência de mão | Lógica sem webcam; validação visual exige câmera. Estados e transições previsíveis, sem usar coordenada vertical isolada como regra geral |
+| 4 — dedos e gestos | `finger_state.py`, `gesture_detector.py`; somente interpretação por mão | Fixtures sintéticas: estados nomeados, Left/Right, rotações, proporção, pinça/escalas/limite inclusivo, degenerações, prioridade e ausência; sem temporalidade | Concluída no escopo atualizado pelo usuário, seção 12. Nenhum hardware; calibração e validação visual permanecem pendentes |
 | 5 — cursor virtual | `action_controller.py` em dry-run, mapa/smoothing e alvo no overlay | `test_action_controller.py`: bordas, centro, clipping, margem, suavização, reset e ausência total de chamadas reais; simular tamanho de tela | Webcam/GUI para ergonomia. Alvo virtual suave e limitado; dry-run funciona sem carregar automação |
 | 6 — mouse opt-in | Backend PyAutoGUI, `--control`, clique e cooldown | Backend falso/spy e relógio injetado: clique único mantido por muitos frames, reabertura/novo clique, cooldown antes/no limite/depois, evento descartado, perda/reaquisição, backend indisponível, fail-safe e nenhuma reativação automática | Webcam, display e permissões. Manual: MOVE, pinça única, novo clique após abertura, parada pelo fail-safe e q/Esc; fallback seguro verificável |
 | 7 — overlay e ergonomia | Completar `overlay.py`, informações do modo/gesto/mão | Testar dados apresentados e modo efetivo após fallback com mocks; manual para legibilidade, feedback de pinça e instruções | Webcam/GUI. Uma pessoa entende o modo e a ação; sem excesso de métricas. FPS permanece opcional posterior |
@@ -223,8 +226,8 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. Após a Fase 3 autorizada,
-a próxima fase proposta é **Fase 4 — dedos e gestos**, que aguardará
+O aceite da Fase 0 foi restrito ao documento. Após a Fase 4 autorizada,
+a próxima fase proposta é **Fase 5 — cursor virtual em dry-run**, que aguardará
 instrução do usuário. A validação visual do tracker ainda exige câmera e escopo
 de integração de captura apropriado. O plano não libera testes reais de controle do computador
 nem gravação de demo por conta própria.
@@ -406,8 +409,8 @@ do ambiente/modelo e dos testes manuais correspondentes.
 O pedido desta fase substituiu o loop/captura/desenho obrigatórios da proposta
 original por uma camada isolada e um smoke de webcam opcional. Não existe loop
 de webcam, overlay, gestos, smoothing no pipeline ou controle do computador.
-Tracking humano e diagnóstico visual permanecem sem aceite manual; a Fase 4
-não foi iniciada e aguarda autorização.
+Tracking humano e diagnóstico visual permanecem sem aceite manual. Ao encerrar
+a Fase 3, a Fase 4 não estava iniciada; sua execução posterior está na seção 12.
 
 ### Inspeção antes de qualquer alteração
 
@@ -535,3 +538,117 @@ tráfego da biblioteca. HGI não envia nem grava frames.
 Os checkpoints RED/GREEN são locais e foram preservados, sem squash ou push.
 Próxima fase recomendada: Fase 4, após autorização. A validação manual de captura
 e landmarks deverá ser realizada quando houver webcam, sem inferir PASS dos mocks.
+
+## 12. Evidências da Fase 4 — dedos e gestos determinísticos
+
+**Estado: concluída somente a interpretação geométrica por mão autorizada.**
+O pedido desta fase adiou explicitamente a temporalidade da proposta original:
+não foram implementados histerese, confirmação, debounce, cooldown ou eventos.
+Nenhum frame, webcam, display, biblioteca de visão ou automação foi usado pelo
+reconhecimento. A Fase 5 não foi iniciada e aguarda autorização.
+
+AGENTS.md, plano, arquitetura, hand_landmarks.py e geometry.py foram lidos
+integralmente antes das alterações. Git estava limpo na branch `mais`, base
+`43be3d7`. ECC aplicado: planejamento, tdd-workflow, python-reviewer e
+verification-loop. Nenhuma API externa foi implementada ou dependência alterada.
+
+### Arquivos, API e decisões
+
+Criados: `src/hgi/finger_state.py`, `src/hgi/gesture_detector.py`,
+`tests/conftest.py`, `tests/test_finger_state.py` e `tests/test_gesture_detector.py`.
+Modificados: README, ARCHITECTURE.md e este plano. O módulo finger_state recebeu
+somente formatação adicional no checkpoint de fechamento. AGENTS.md, geometria,
+tipos internos de mão, tracker, smoothing e pyproject.toml foram preservados.
+
+API: GestureConfig imutável; FingerState com thumb/index/middle/ring/pinky;
+detect_fingers(hand, config=None); pinch_ratio(hand, config=None); Gesture enum;
+GestureDetector(config=None), detect(hand) e configuração somente leitura.
+
+As quatro cadeias MCP→PIP→DIP→TIP usam chord/path ≥0.9 e ponta mais distante do
+punho que PIP. O polegar usa MCP→IP→TIP e abertura relativa à base do indicador
+≥0.2 da referência wrist→middle MCP. As regras de distância são simétricas para
+Left/Right; handedness/score ausentes não impedem avaliação. Não há regra tip.y < pip.y.
+
+Pinch: distance(THUMB_TIP, INDEX_FINGER_TIP) / distance(WRIST, MIDDLE_FINGER_MCP),
+com limiar inclusivo ≤0.25. Essa proporção corresponde a um quarto da referência,
+um ponto inicial configurável sem calibração empírica. PINCH tem prioridade;
+POINT exige somente indicador, OPEN_HAND cinco dedos, FIST nenhum, demais UNKNOWN.
+None representa ausência e retorna UNKNOWN; geometria inválida gera erro explícito.
+
+XY é corrigido por largura/altura fornecida via image_aspect_ratio, padrão 1.
+Sem consulta de hardware, clipping ou uso de Z na heurística. Referências e
+segmentos ≤1e-6 são rejeitados; todos os parâmetros são configuráveis, validados
+e sem números mágicos duplicados. Reutilizadas distance/normalized_distance.
+As fórmulas, intervalos e limitações estão em ARCHITECTURE.md.
+
+### TDD, refactor e garantias
+
+Requisitos foram convertidos em testes antes da implementação. Nenhum mock é
+usado nesta fase: a factory produz DetectedHand/NormalizedLandmark reais. Os
+dois RED iniciais são erros de coleta por APIs ausentes; não são 18/15 testes
+executados e falhando. A regressão numérica tem RED real em runtime.
+
+| Incremento | Comando do ciclo | RED observado | GREEN observado | Checkpoints |
+|---|---|---|---|---|
+| Estados dos dedos/configuração | `python -m pytest -q tests/test_finger_state.py` | 1 erro de coleta: hgi.finger_state ausente | 18 passaram | `c85d96e` → `e636adc` |
+| Refactor das cadeias fixas | Mesmo teste de dedos | Não requerido: refactor com suíte verde | 18 passaram antes/depois | `66dfe9f` |
+| Pinça e gestos | `python -m pytest -q tests/test_gesture_detector.py` | 1 erro de coleta: pinch_ratio ausente | 34 passaram ao executar dedos+gestos | `08f34d4` → `9e02a17` |
+| Overflow na abertura normalizada do polegar | Testes de dedos | 1 falhou, 19 passaram; infinito não era rejeitado | 35 passaram em dedos+gestos | `18ede89` → `43d7bcb` |
+
+O segundo grupo adicionou também uma garantia de dedo reto apontando para o
+punho; a regressão acrescentou uma garantia numérica. Total novo: **35 testes**,
+20 de dedos/configuração e 15 de gestos. Não houve squash, reescrita ou push.
+
+| Garantia de comportamento | Teste/arquivo | Tipo | Evidência |
+|---|---|---|---|
+| FIST, indicador, indicador+médio e cinco dedos | test_named_finger_states | Unitário puro | PASS no pytest final |
+| Polegar aberto em Left/Right e sem metadata | test_thumb_uses_same_geometry_for_left_right_and_missing_metadata | Geometria sintética | PASS |
+| Rotações de 90°/180° independem do sentido de Y | test_in_plane_rotation_does_not_depend_on_tip_y | Geometria sintética | PASS |
+| Polegar reto aduzido e dedo reto voltado ao punho não bastam | Testes de polegar e cadeia voltada ao punho | Geometria sintética | PASS |
+| Proporção retangular e thresholds configuráveis | Testes de aspect/configuração | Contrato de parâmetros | PASS |
+| PINCH abaixo/no limite, rejeição acima, prioridade sobre POINT | Testes de pinça/prioridade | Unitário puro | PASS |
+| Escalas 0.5 e 2 preservam razão/gesto | test_uniform_hand_scaling_preserves_ratio_and_gesture | Geometria sintética | PASS |
+| Referência zero/próxima de zero e segmentos coincidentes geram erro | Testes de degenerações | Contrato de entrada | PASS |
+| Número incorreto de pontos é barrado pelo tipo interno | test_invalid_hand_size_is_rejected_by_internal_type | Contrato de DetectedHand | PASS |
+| UNKNOWN, ausência e chamadas repetidas sem estado temporal | Testes de semântica/ausência | Unitário puro | PASS |
+| Overflow de normalização não produz extensão válida | test_thumb_spread_overflow_is_rejected | Regressão numérica RED→GREEN | PASS |
+
+### Revisão e verification-loop
+
+| Verificação executada | Resultado |
+|---|---|
+| `python -m pytest -q` | 219 passaram, 35 novos, sem skips |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 99% total; 290 instruções, 1 não coberta; 80 branches cobertos |
+| Cobertura dos novos módulos | finger_state: 100% (54 instruções/12 branches); gesture_detector: 97% (29 instruções/10 branches) |
+| `python -m ruff check .` | PASS |
+| `python -m ruff format --check .` | PASS |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | Nenhum requisito quebrado; aviso de cache indisponível do sandbox, sem falha |
+| Wheel offline, sem deps/build isolation/index, em /tmp/hgi-phase4-wheels | PASS; módulos da Fase 4 incluídos |
+| POINT e PINCH via `python -I -S -B`, sem site-packages | PASS; sem NumPy/MediaPipe/cv2/PyAutoGUI carregados |
+| `python -m hgi` | Identificação preservada; nenhum hardware aberto |
+| python-reviewer e inspeção AST | Interfaces tipadas, APIs documentadas, funções de produção ≤32 linhas; sem CRITICAL/HIGH pendente |
+| Scan limitado e inspeção de imports | Sem imports proibidos, acesso ao SO, exceções genéricas, segredos ou execução dinâmica nos arquivos desta fase |
+| Diff/whitespace/documentação | PASS, alterações restritas ao incremento |
+
+Mypy/Pyright não estão instalados; tipos foram revisados manualmente, sem alegar
+checagem estática dedicada. A linha não coberta é somente o getter detector.config;
+não foram adicionados testes para perseguir 100%. Todas as decisões do classificador
+estão cobertas. Testes sintéticos não demonstram acurácia com mãos reais.
+
+Problemas corrigidos: B905 de zip e B008 de default na assinatura, linha longa,
+formatação, função inicial de dedos com 59 linhas e overflow da normalização do
+polegar. Cadeias fixas foram movidas para constante; normalização do polegar passou
+a reutilizar a validação de finitude de geometry.py. Nenhuma regra foi desativada
+ou exceção ocultada para obter PASS.
+
+Limitações: projeção 2D, comprimentos de ossos desiguais, oclusão, ruído, rotação
+fora do plano e poses diferentes de polegar podem confundir as regras; proporção
+incorreta distorce distâncias. Z não participa. O mínimo absoluto torna mãos
+numericamente minúsculas inválidas. Os limiares não foram calibrados com câmera.
+Não é reconhecimento universal de linguagem de sinais. Nenhum teste manual de
+hardware foi executado ou exigido para aceitar a lógica determinística desta fase.
+
+Próxima fase recomendada: **Fase 5 — cursor virtual em dry-run**, somente após
+autorização. Calibração, diagnóstico visual e proteção temporal permanecem itens
+futuros; nenhum controle real do computador foi habilitado.
