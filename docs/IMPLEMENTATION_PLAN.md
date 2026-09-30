@@ -19,7 +19,7 @@ O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
 e encerramento limpo. Volume, mídia, calibração e persistência ficam para
 depois da validação do MVP. FPS observável foi autorizado na Fase 7.
-Não haverá treinamento, backend, banco ou API OpenAI.
+Não haverá treinamento, backend remoto, banco ou API OpenAI.
 
 ## 2. Inspeção inicial
 
@@ -47,102 +47,66 @@ não a seleção final de dependências. Conteúdo de credenciais não foi inspe
 Não existem convenções de código ou histórico para reutilizar. A proposta segue
 o `AGENTS.md`: módulos pequenos, nomes explícitos, type hints e funções puras.
 
-## 3. Arquitetura proposta
+## 3. Arquitetura atual
 
 ```mermaid
 flowchart LR
-    A[Webcam] --> B[OpenCV: captura]
-    B --> C[HandTracker: MediaPipe]
-    C --> D[Landmarks e handedness]
+    A[Camera / OpenCV BGR] --> B[Espelhamento e RGB]
+    B --> C[HandTracker / MediaPipe]
+    C --> D[DetectedHand]
     D --> E[GestureDetector]
-    E --> T[TemporalGestureFilter: confirmação e gates]
-    T --> F[CursorController: opt-in, mapeamento e smoothing]
+    E --> T[TemporalGestureFilter]
+    T --> F[CursorController: opt-in, mapeamento e EMA]
     F --> J[CursorCommand]
-    J --> G[DryRunCursorSink ou futuro backend opt-in]
-    B --> H[Overlay]
+    J --> G[DryRunCursorSink / RealCursorSink]
+    A --> H[Overlay]
     D --> H
-    E --> H
     F --> H
     H --> I[Janela OpenCV]
 ```
 
-| Módulo previsto em `src/hgi/` | Responsabilidade |
+| Módulo em `src/hgi/` | Responsabilidade |
 |---|---|
-| `__init__.py`, `__main__.py` | Importação sem efeitos colaterais; entrypoint `python -m hgi` |
-| `app.py` | CLI argparse, recursos, loop e encerramento; nenhuma regra geométrica |
-| `config.py` | Parâmetros centralizados e validados; dry-run como padrão |
-| `hand_landmarks.py` | Representação própria dos 21 pontos XYZ, índices oficiais e handedness/score opcionais |
-| `geometry.py` | Distâncias, normalização por escala, mapeamento e clipping |
-| `hand_tracker.py` | Adaptar frames e resultados MediaPipe; nunca executar ações |
-| `finger_state.py` | Configuração imutável, dedos nomeados e medidas geométricas da mão |
-| `gesture_detector.py` | Rótulo bruto, pose dos dedos e razão de pinça por chamada; stateless |
-| `temporal.py` | Duração de estabilização, histerese, rearmamento, cooldown e grace period com clock injetável |
-| `smoothing.py` | Média exponencial e reset, sem dependência de hardware |
-| `cursor.py` | Intenções tipadas MOVE/CLICK/NONE, Protocol de saída e sink dry-run em memória |
-| `cursor_controller.py` | Opt-in explícito, configuração imutável, alvo virtual, mapeamento e EMA |
-| `action_controller.py` | Futuro backend real e fail-safe; exige autorização própria; proteção temporal já isolada |
-| `overlay.py` | Landmarks, mão, gesto, modo, alvo virtual e feedback de pinça |
+| `__init__.py`, `__main__.py` | Importação sem hardware; identificação com `python -m hgi` |
+| `camera.py` | Captura BGR e ciclo de vida da webcam |
+| `webcam.py` | Configuração da demo, pipeline, seleção de mão, teclas e recursos |
+| `hand_landmarks.py` | Tipos internos, 21 pontos XYZ e lateralidade/score opcionais |
+| `geometry.py` | Distâncias, normalização, mapeamento e clipping |
+| `hand_tracker.py` | Adaptar RGB uint8 e resultados MediaPipe Tasks Vision |
+| `finger_state.py`, `gesture_detector.py` | Geometria, dedos, rótulo bruto e razão de pinça |
+| `temporal.py` | Estabilização, histerese, rearmamento, cooldown e tracking grace |
+| `smoothing.py` | EMA e reset, sem hardware |
+| `cursor.py` | MOVE/CLICK/NONE, Protocol de saída e sink dry-run |
+| `cursor_controller.py` | Enable/disable, alvo virtual, mapeamento e EMA |
+| `real_cursor.py` | Backend PyAutoGUI isolado, coordenadas e fail-safe |
+| `click_feedback.py` | Contador/timestamp de CLICK exclusivamente na UI |
+| `overlay.py` | Landmarks, estado, região ativa, alvo virtual e feedback |
 
-Os módulos implementados na Fase 2 e seus contratos estão em
-[ARCHITECTURE.md](ARCHITECTURE.md). `Point2D` e `Region2D` residem em `geometry.py`;
-`hand_landmarks.py` foi implementado na Fase 3, seguindo o nome solicitado pelo
-usuário, e evita índices mágicos e acoplamento das regras à API externa.
-O backend PyAutoGUI poderá permanecer
-pequeno no controlador, sem hierarquia de plugins. Imports de automação serão
-adiados até `--control`; testes e dry-run usarão um backend sem efeitos reais.
-Sem display, testes e imports devem funcionar; a janela exige uma sessão gráfica.
+`scripts/demo_webcam.py` oferece argparse; `scripts/demo_cursor.py` é uma demo
+finita e sintética. Não são necessários app.py/config.py/action_controller.py
+adicionais. Configuração permanece em dataclasses por responsabilidade.
+Contratos e decisões detalhados estão em [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### Decisões para os primeiros incrementos
+Decisões vigentes: MediaPipe IMAGE síncrono, CPU, uma mão por padrão e modelo
+local explícito; BGR→RGB na integração; distâncias 2D corrigidas pela proporção
+do frame; pinça normalizada por wrist→middle MCP. POINT confirmado produz MOVE
+com margem/EMA; PINCH confirmado produz um clique por fechamento armado.
+O filtro temporal usa duração, histerese e cooldown, sem fila de clique. Perda
+breve suspende comandos e preserva interação; perda longa limpa o movimento e
+exige abertura confirmada. Seleção usa maior handedness_score sem identidade
+persistente. A demo espelha antes da inferência e usa mirror_x=False.
 
-- Preferir Python 3.11 e validar instalação limpa antes de fixar versões.
-  `pyproject.toml` será a referência; `requirements.txt` deverá ser consistente.
-  Desenvolvimento terá pytest, pytest-cov e Ruff, sem ferramentas redundantes.
-- Usar Hand Landmarker da API Tasks, CPU, uma mão por padrão e **IMAGE** síncrono
-  na Fase 3, para processar um frame sem timestamps ou estado temporal. A API foi
-  confirmada na versão instalada 1.0.1. A proposta anterior de VIDEO fica para
-  futura integração de vídeo; esse modo exige timestamps crescentes. Exigir modelo
-  local compatível, preparado explicitamente, nunca adquirido no runtime.
-  Origem, versão, licença indicada pela model card e checksum estão em MODELS.md.
-- Não copiar exemplos de `mp.solutions.hands` sem comprovar compatibilidade.
-  Handedness descreve lateralidade, não identidade persistente de uma mão.
-- Converter BGR para RGB na futura captura, antes da chamada ao tracker, cuja
-  entrada nesta fase é estritamente RGB. Preservar coordenadas
-  normalizadas e corrigir a proporção largura/altura no cálculo de distâncias
-  2D, para não distorcer a pinça em frames retangulares.
-- Na Fase 4, avaliar extensão por razão chord/path da cadeia articular e distância
-  relativa ao punho; tratar o polegar separadamente por abertura da base do indicador.
-  A proposta de ângulos individuais foi simplificada; relações/distâncias 2D
-  favorecem leitura e testes. Rotações no plano e ambas as mãos têm testes;
-  oclusão e rotação fora do plano permanecem limitações.
-- Propor referência de palma entre wrist e middle MCP. Rejeitar escala degenerada
-  e pontos não finitos; não substituir resultados inválidos por gestos válidos.
-- Mapear indicador da área útil da câmera para `0..largura-1` e `0..altura-1` da
-  tela primária, com margem configurável e clipping. No dry-run, usar dimensões
-  virtuais explícitas, sem depender do PyAutoGUI.
-- Aplicar `previous + alpha * (current - previous)`, com `0 < alpha <= 1`;
-  primeiro ponto inicializa o filtro. Resetar na perda de tracking/inatividade.
-- MOVE exige POINT estável, somente indicador estendido e ausência de pinça.
-  A Fase 6 adotou confirmação por duração (80 ms), thresholds 0.25 < 0.32,
-  cooldown de 300 ms e relógio injetável; nenhum contador de frames adicional.
-- Pinça mantida não repete clique; gesto descartado por cooldown não é enfileirado.
-  Após perda longa (150 ms desde a primeira ausência), bloquear cliques até
-  abertura confirmada e reiniciar smoothing. Ausência breve preserva interação.
-  Troca de mão sem ausência exige reset explícito; não há identificação persistente.
-- Começar DISABLED. enable permite somente intenções virtuais; disable/reset
-  limpam a sessão e não emitem comandos. Erros desabilitam e propagam a causa.
-- Manter `FAILSAFE` e pausas de segurança. Fail-safe ou erro conhecido do backend
-  desarma controle e mantém detecção em dry-run, com aviso; não rearmar sozinho.
-  Erros inesperados encerram com limpeza, sem `except` genérico que os esconda.
+Dry-run é padrão. Somente --real-control seleciona o backend real; E habilita
+a sessão iniciada DISABLED. Falha do backend trava o sink, desabilita e propaga
+a exceção original, encerrando a demo com limpeza. Não há fallback silencioso
+para dry-run, retry ou rearmamento automático após falha.
 
 ## 4. Milestones e ordem de implementação
 
-Ordem: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → gate da 8 → 9 → 10**.
-A Fase 8 é adiada durante a entrega do MVP; só poderá iniciar depois da Fase 10
-e dos testes manuais obrigatórios. Documentação acompanha cada fase, além do
-fechamento na Fase 9. Não marcar milestone concluído com aceite manual pendente.
-O backend real originalmente previsto na Fase 6 foi adiado pelo pedido atual;
-exigirá um incremento com autorização e plano próprios antes do aceite final
-do MVP. A Fase 7 proposta não autoriza automação implicitamente.
+Ordem vigente autorizada pelo usuário: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**.
+A Fase 8 desta sequência é backend real; a Fase 9 é polimento. Extras e QA de
+outra fase não são autorizados implicitamente. Documentação acompanha cada
+incremento. Implementação automatizada concluída não substitui aceite manual.
 
 | Fase | Incremento e arquivos principais | Testes e verificações | Hardware e critério de aceite |
 |---|---|---|---|
@@ -154,8 +118,8 @@ do MVP. A Fase 7 proposta não autoriza automação implicitamente.
 | 5 — cursor virtual | `cursor.py`, `cursor_controller.py`, comandos em memória e demo sintética; sem overlay ou captura | `test_cursor.py`, `test_cursor_controller.py`: dados/sink, centro, clipping, região, espelhamento, resoluções, EMA, reset, inatividade e clique lógico por transição | Concluída no escopo atualizado pelo usuário, seção 13. Sem hardware; alvo limitado e suave, saída inspecionável; ergonomia visual pendente |
 | 6 — temporal e opt-in lógico | `temporal.py`, observações do detector e gates do CursorController; somente sink dry-run | Clock falso: confirmação, histerese, rearmamento, cooldown inclusivo/sem fila, perda curta/longa, enable/disable/reset e falhas que desabilitam | Concluída no escopo atualizado pelo usuário, seção 14. Sem hardware/automação; backend real e fail-safe ainda pendentes |
 | 7 — integração visual dry-run | `camera.py`, `webcam.py`, `overlay.py`, demo e observabilidade pública limitada | 48 testes novos sem hardware; captura/cor/RGB, seleção, overlay, temporalidade, teclas, falhas/limpeza e CLI | Implementada, com aceite manual pendente: sem /dev/video*. FPS simples autorizado. Exclusivamente DryRunCursorSink; evidências na seção 15 |
-| 8 — gate de extras | Volume/mídia e demais extras adiados | Nenhum teste ou código de extras durante o MVP; futura fase precisará de plano próprio e testes de backend degradável | Aceite do MVP é pré-requisito; indisponibilidade de mídia não poderá afetar mouse/detecção |
-| 9 — documentação | README completo, arquitetura, testes, licença, assets, plano atualizado e instruções de demo | Reproduzir instalação em ambiente isolado e comandos do README; revisar links, gestos, matemática, histerese, segurança e limites por SO | Instalação sem câmera; execução completa exige hardware. Outra pessoa consegue instalar/executar seguindo só o README |
+| 8 — backend real | RealCursorSink, adaptador PyAutoGUI, flag e fail-safe | 403 testes totais; fakes sem mouse real, resolução, opt-in, limites, falhas e limpeza | Implementada conforme seção 16; consulta X11 somente leitura passou, smoke humano pendente |
+| 9 — polimento e portfólio | README, CLI, arquitetura, modelos, assets, calibração e checklist | Instalação limpa, wheel, comandos do README, revisão e suíte completa | Evidências na seção 17; licença, GIF e aceite de hardware ficam explícitos, sem tag/publicação |
 | 10 — QA do MVP | Correções necessárias, revisão final e evidências | Ruff, pytest, cobertura, compileall, revisão Python/segurança/diff e quality-gate estrito se disponível no harness; roteiro manual completo | MVP só pronto com verificações automatizadas e manuais aprovadas. Pendências de hardware serão registradas, nunca tratadas como PASS |
 
 ## 5. Processo ECC e estratégia de testes
@@ -204,13 +168,13 @@ resultados reais, cobertura, limitações manuais e próxima fase permitida pela
 autorização vigente. Verificar também arquivos novos: `git diff` não os inclui
 enquanto não forem versionados. Na Fase 0, build/lint/testes de código são N/A.
 
-## 6. Dependências externas e riscos técnicos
+## 6. Riscos identificados na inspeção inicial
 
 | Risco | Impacto e mitigação proposta |
 |---|---|
-| Webcam ausente/inacessível | Alto: nenhum dispositivo visível aqui. Validar no computador de demo na Fase 3; não afirmar que tracking foi aprovado com mocks |
-| OpenCV duplicado | Alto: duas distribuições instaladas compartilham `cv2`. Preparar ambiente isolado com apenas uma distribuição com GUI; considerar dependência transitiva do MediaPipe antes de escolher python ou contrib |
-| API/wheels MediaPipe e NumPy | Alto: versões do ambiente ainda não homologadas. Consultar fonte oficial, validar imports e modelo em instalação limpa; escolher versões compatíveis, não fixar por memória |
+| Webcam ausente/inacessível | Alto: nenhum dispositivo visível aqui. Validar no computador da demo; não afirmar que tracking foi aprovado com mocks |
+| OpenCV duplicado | Resolvido na Fase 7: somente contrib com GUI permanece; novas instalações também devem evitar variantes simultâneas |
+| API/wheels MediaPipe e NumPy | Imports e modelo sintético foram validados; instalação limpa e versões estão na seção 17. Plataformas adicionais exigem validação própria |
 | Modelo externo | Alto: Tasks necessita arquivo compatível. Preparar download separado, origem oficial, licença/checksum e erro claro se ausente; execução offline após instalação |
 | Linux Wayland/macOS/permissões | Alto: controle depende do SO; X11 atual não prova permissão. Dry-run deve continuar disponível; sem contornar proteção do sistema |
 | Display ausente e monitor/DPI | Médio: janela precisa de GUI; PyAutoGUI orienta tela primária. Documentar limite, validar escala no host e não prometer múltiplos monitores |
@@ -232,7 +196,7 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Instalação documentada reproduzida; pacote importável sem abrir hardware.
 - Webcam e landmarks/handedness aprovados manualmente, com encerramento limpo.
 - Dedos/gestos testados; movimento virtual suave e mapeamento limitado.
-- Controle somente com `--control`; fail-safe preservado e falhas desarmam ações.
+- Controle somente com `--real-control` + E; fail-safe preservado e falhas desarmam ações.
 - Uma pinça mantida gera um clique; debounce, histerese, cooldown e reaquisição
   cobertos por testes determinísticos.
 - Ruff e pytest passam; cobertura de lógica atende à meta; sem CRITICAL/HIGH.
@@ -240,10 +204,10 @@ de lógica pode ser preparado, sem declarar a fase de integração concluída.
 - Sem segredos, chamadas OpenAI, transmissão ou gravação automática de webcam.
 - Todos os itens da Definition of Done do `AGENTS.md` revisados com evidência.
 
-O aceite da Fase 0 foi restrito ao documento. A **Fase 7 — integração visual em
-dry-run** foi autorizada posteriormente e está registrada na seção 15. A validação
-visual do tracker ainda exige câmera. O plano não libera testes reais de controle do computador
-nem gravação de demo por conta própria.
+A Fase 9 prepara instalação, documentação e checklist. O aceite físico ainda
+exige câmera e validação humana, conforme [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+Não declarar release pronta antes desses gates, do GIF e da decisão de licença.
+Não criar tag, publicar, fazer push ou gravar demo nesta sessão.
 
 ## 8. Fontes consultadas e limites da pesquisa
 
@@ -254,7 +218,7 @@ nem gravação de demo por conta própria.
 
 As URLs diretas de guia/setup em `ai.google.dev` falharam na ferramenta de
 consulta; foram usadas fontes oficiais alternativas para o Hand Landmarker.
-Não foi homologada nesta fase uma matriz de versões/plataformas. Revalidar fontes
+Na pesquisa inicial não foi homologada uma matriz de versões/plataformas. Revalidar fontes
 e APIs da versão selecionada durante bootstrap e integração, antes de implementar.
 
 ## 9. Evidências da Fase 1 — bootstrap
@@ -1475,3 +1439,125 @@ NumPy/OpenCV necessários aos testes sintéticos. Duplicação entre extras dev 
 vision é intencional: pytest não exige MediaPipe nativo. Somente contrib está
 instalado, 5.0.0.93, exigido também pelo MediaPipe. Nenhuma versão será atualizada
 sem evidência técnica. pyproject.toml permanece a fonte única de dependências.
+
+### Alterações e checkpoints
+
+- README reestruturado para portfólio: descrição, placeholder real, funcionalidades,
+  gestos, arquitetura Mermaid, segurança, instalação, modelo, uso/controles,
+  testes/build, decisões, limitações, roadmap e licença pendente. Histórico de
+  manutenção fica neste plano, sem números de cobertura permanentes no README.
+- Plano/arquitetura/modelos atualizados para o código existente; evidências
+  anteriores preservadas nas seções 9–16. Sem refactor da arquitetura ou pipeline.
+- CLI descreve todas as opções, defaults/unidades e controles; dependências
+  ausentes indicam comando de instalação. CameraError preserva a mensagem e
+  sugere outro índice sem retry/autodetecção. Docstring antiga do entrypoint corrigida.
+- assets/README.md prepara demo.gif sem binário fictício. CALIBRATION.md contém
+  parâmetros reais dos construtores, tabela vazia e orientação de um ajuste por vez.
+  RELEASE_CHECKLIST.md separa checks automatizados, aceite físico e decisões do autor.
+- .gitignore protege *.task em qualquer nível e /.aws/, além dos caches, logs,
+  coverage, IDE e artefatos já ignorados. Nenhum arquivo do usuário foi apagado.
+- pyproject.toml auditado e preservado: extras coerentes, versões sem alteração,
+  nenhuma dependência direta sem uso. Pacote continua 0.1.0.dev0; não foi criada licença.
+
+| Garantia | Alvo | Evidência | Checkpoint |
+|---|---|---|---|
+| Erro de câmera mantém causa visível e sugere índice diferente, sem repetir tentativa | test_cli_camera_failure_suggests_alternative_without_retry, índices 0/1 | RED: 2 falhas por ausência da sugestão; GREEN: mesmo alvo e integrações, 40 passes | 3bccc81 RED; 5f8593e GREEN |
+
+Esses checkpoints pertencem à branch mais e à tarefa Fase 9. Sem novo teste
+artificial para texto estático, sem duplicar testes geométricos/temporais.
+Os dois casos novos elevam a suíte de 403 para 405 testes.
+
+### Instalação, build e verificação — resultados reais
+
+Todas as verificações do ambiente HGI usaram Python 3.11.16 de
+/home/syl/miniconda3/envs/hgi/bin/python, não o Python do ambiente base.
+
+| Comando / verificação | Resultado |
+|---|---|
+| python -m pytest -q | PASS: 405 testes em 0.52 s |
+| python -m pytest --cov=hgi --cov-report=term-missing | PASS: 405 testes; 99% total, linhas/branches; 969 statements, 7 ausentes, 236 branches, 5 parciais |
+| python -m ruff check . | PASS, sem achados |
+| python -m ruff format --check . | PASS, 46 arquivos já formatados |
+| python -m compileall src | PASS |
+| python -m pip check | PASS no Conda HGI, no venv completo e no venv da wheel |
+| python -m hgi | PASS, identificação e saída sem inicializar hardware |
+| python scripts/demo_webcam.py --help | PASS, oito opções incluindo help, defaults, duplo opt-in e teclas |
+| python scripts/demo_cursor.py | PASS no venv novo, sequência finita POINT/PINCH/cooldown/disable |
+| demo_webcam.py --model /tmp/hgi-phase9-absent.task | Exit 1 esperado, mensagem docs/MODELS.md, sem câmera/backend real |
+| python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist . | PASS nos ambientes HGI e venv completo; wheel hgi-0.1.0.dev0-py3-none-any.whl |
+| Links locais e anchors Markdown | PASS em README, docs e assets; placeholder GIF não é link quebrado |
+| git diff --check e revisão do diff | PASS, somente escopo Fase 9 |
+
+Instalação limpa completa: criado venv /tmp/hgi-phase9-clean com Python 3.11,
+sem system-site-packages; pip install -e ".[dev,vision,control]" passou.
+405 testes e Ruff passaram também nesse ambiente. Imports reais de cv2 e
+MediaPipe passaram, sem carregar PyAutoGUI. Versões resolvidas: MediaPipe 1.0.1,
+NumPy 2.4.6, opencv-contrib-python 5.0.0.93 (cv2 5.0.0), PyAutoGUI 0.9.54,
+pytest 9.1.1, pytest-cov 7.1.0 e Ruff 0.16.9. Apenas contrib está instalado.
+As dependências do ambiente original não foram modificadas.
+
+A tentativa inicial no sandbox falhou por DNS; a instalação completa passou
+após execução autorizada fora dele. Build com isolamento também falhou por DNS,
+inclusive na tentativa externa. Esse caminho não recebeu PASS. O comando de
+build documentado usa setuptools>=68 já instalado (84.0.0 no HGI e 79.0.1 no
+venv), sem isolamento nem resolução de dependências. Não houve upgrade de
+setuptools ou alteração do requisito de build para esconder a falha de rede.
+
+A wheel foi instalada offline num segundo venv limpo, /tmp/hgi-phase9-wheel,
+sem extras. Executado python -m hgi a partir de /tmp, fora da árvore fonte.
+O import resolveu para site-packages, controller iniciou DISABLED e nenhuma
+biblioteca nativa (cv2, MediaPipe ou PyAutoGUI) foi carregada. Wheel inspecionada:
+16 módulos HGI, Python >=3.11 e extras control/vision/dev corretos; sem modelos,
+vídeos, logs ou credenciais. Scripts/docs exigem a cópia do repositório.
+
+### Revisões ECC e segurança
+
+Aplicadas as orientações de code-reviewer, python-reviewer, doc-updater,
+security-review, documentation-lookup e verification-loop do ECC 2.2.2,
+adaptadas a Python/local e executadas nesta sessão, sem delegação a subagentes.
+Context7 não está exposto; consultadas fontes oficiais PyPA, página MediaPipe
+1.0.1 e model card para revisar empacotamento, licença/origem e privacidade.
+
+| Revisão | Resultado |
+|---|---|
+| Python/code review | APPROVE: 0 CRITICAL/HIGH; interfaces/erros/imports e diff Python revistos, Ruff passou |
+| Documentação | PASS: comandos executados, opções/defaults conferidos contra código, links/anchors válidos; API e parâmetros de calibração conferidos |
+| Security-review | PASS no escopo: opt-in e fail-safe preservados, efeitos isolados, ausência de novos acessos/execução externa; testes sem mouse real |
+| Verification-loop | Build sem isolamento, lint, testes/cobertura, compilação, instalação e diff PASS; build isolado limitado por DNS, hardware pendente |
+| Tipos / scanner de dependências | Revisão manual; pyright, mypy, bandit e scanner de CVEs não instalados/não executados. Ruff não substitui essas ferramentas |
+
+Verificados enable/disable/reset/quit/Ctrl+C, perda de tracking e erro do sink
+pelos testes existentes; nenhuma semântica dessas camadas foi alterada.
+PyAutoGUI continua importado somente no backend real, default dry-run; flag e E
+continuam necessários. FAILSAFE=True preservado, PAUSE não alterada. Pytest
+bloqueia PyAutoGUI real e usa backends falsos; nenhum teste movimenta/clica mouse.
+O feedback CLICK segue só na UI. Apenas waitKey lê teclas na janela; não há
+atalhos globais ou envio de teclas, clipboard, subprocess/comando externo,
+gravação/transmissão de frames ou chamada OpenAI no código da aplicação.
+
+Git não contém modelos, vídeos, logs, coverage, .env ou credenciais. Pesquisa
+de padrões de chaves/keys privadas nos arquivos e histórico de código/docs não
+encontrou correspondências; conteúdo da pasta local .aws não foi lido.
+Ignore conferido também para modelo aninhado, .aws/credentials, .env.local,
+IDE, build/dist, venv, logs e coverage. A dependência MediaPipe informa métricas
+de uso/desempenho, documentadas em MODELS.md; não foi prometida ausência de
+tráfego da biblioteca nativa. A revisão não equivale a auditoria completa de CVEs.
+
+### Pendências de aceite e release
+
+Sem /dev/video*: smoke humano dry-run/real não realizado nesta sessão. Não há
+FPS ou latência observados, nem validação física de POINT/PINCH/direção/jitter.
+Os resultados sintéticos não substituem o roteiro A–D.
+
+Dependem do usuário: aceite manual com webcam e mouse em área segura, medições
+e registro de calibração, demo.gif real e escolha da licença. MIT é uma opção
+para considerar; não aplicada nem criada sem autorização. Após esses gates,
+atualizar versão para 0.1.0 e revalidar testes/wheel antes de autorizar tag/release.
+O checklist está preparado, com gates físicos/decisões abertos. Nesta fase não
+houve tag, push, publicação ou nova funcionalidade principal. Próximo passo é
+fechar essas pendências da release; nenhuma fase adicional foi iniciada.
+
+Fontes oficiais revisadas nesta fase:
+[PyPA — empacotamento](https://packaging.python.org/en/latest/tutorials/packaging-projects/),
+[MediaPipe 1.0.1 — aviso de privacidade](https://pypi.org/project/mediapipe/1.0.1/) e
+[model card Hand Tracking](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Hand%20Tracking%20%28Lite_Full%29%20with%20Fairness%20Oct%202021.pdf).

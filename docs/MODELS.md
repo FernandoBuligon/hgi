@@ -1,9 +1,14 @@
 # Modelo do HandTracker
 
+Revisado em 30/09/2026. Requer instalação do extra `vision`, conforme
+[README.md](../README.md#instalação), antes do smoke abaixo.
+
 O `HandLandmarker` exige o bundle compatível contendo detector de palma e modelo
 de landmarks. HGI recebe um caminho local explícito; não procura, baixa ou atualiza
 modelos durante a execução. Sem arquivo, o construtor gera `FileNotFoundError`.
 Um arquivo incompatível gera `HandTrackerError`, preservando a causa do MediaPipe.
+Separar a preparação da execução torna a versão e o acesso à rede explícitos,
+permite conferir o checksum e evita downloads inesperados durante a demo.
 
 ## Preparação explícita
 
@@ -19,7 +24,10 @@ curl --fail --location --max-time 60 \
 sha256sum models/hand_landmarker.task
 ```
 
-O arquivo adquirido nesta fase tem **7.819.105 bytes** e SHA-256:
+O comando cria o diretório e baixa somente o bundle. No Windows, crie `models`
+e use a mesma URL no navegador ou `curl.exe`; confira com `Get-FileHash` abaixo.
+
+O bundle validado tem **7.819.105 bytes** e SHA-256:
 
 ```text
 fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1
@@ -28,7 +36,8 @@ fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1
 Esse checksum foi calculado sobre o download observado, não é uma assinatura do
 fornecedor. Compare antes de usar; uma divergência deve ser investigada, não aceita
 como atualização automática. No PowerShell: `Get-FileHash -Algorithm SHA256 models/hand_landmarker.task`.
-Não coloque o arquivo no Git: `/models/*.task` está no `.gitignore`.
+Não coloque o arquivo no Git: `*.task` está no `.gitignore`, inclusive em
+subdiretórios e caminhos alternativos dentro do repositório.
 Um caminho fora do repositório também é aceito.
 
 A [model card vinculada pelo guia oficial](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Hand%20Tracking%20%28Lite_Full%29%20with%20Fairness%20Oct%202021.pdf)
@@ -62,10 +71,12 @@ O backend emitiu avisos de feedback tensors e `NORM_RECT`/projeção, sem impedi
 a execução. Isso confirma inicialização, inferência sem mão e fechamento,
 **não** confirma landmarks de uma mão real ou sua estabilidade.
 
-Não havia `/dev/video*` visível. Captura, conversão BGR→RGB e diagnóstico visual
-manual continuam pendentes para uma sessão com câmera, sem integrar gestos ou ações.
-Quando forem adicionados, devem usar recursos com encerramento garantido e não
-salvar nem transmitir frames por padrão.
+Captura, conversão BGR→RGB e overlay já estão implementados. Execute a demo
+documentada no README depois de preparar o bundle; a sessão inicia DISABLED e
+em dry-run. HGI não salva nem transmite frames. Validação humana de landmarks,
+gestos e cursor continua pendente porque não há `/dev/video*` nesta sessão.
+Use [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md#teste-manual-final) para o roteiro
+e [CALIBRATION.md](CALIBRATION.md) para registrar resultados reais.
 
 O [aviso de privacidade do MediaPipe 1.0.1](https://pypi.org/project/mediapipe/1.0.1/)
 informa processamento local dos dados de entrada e coleta de métricas de uso e

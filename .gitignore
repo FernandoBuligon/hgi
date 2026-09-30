@@ -14,6 +14,7 @@ dist/
 
 .env
 .env.*
+/.aws/
 
 .venv/
 venv/
@@ -25,5 +26,5 @@ venv/
 
 *.log
 
-# MediaPipe models are prepared explicitly, never committed.
-/models/*.task
+# MediaPipe bundles are prepared explicitly, never committed, at any location.
+*.task

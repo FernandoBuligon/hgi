@@ -1,20 +1,110 @@
 # HGI — Hand Gesture Interface
 
-Projeto local de visão computacional para interpretar gestos da mão.
-**Fase 8 implementada: backend real com duplo opt-in e fail-safe.**
-**Dry-run é o modo padrão.** A demo visual interpreta a mão e mostra intenções.
-Mouse real exige `--real-control` e depois E na janela. A validação com
-webcam humana permanece pendente nesta sessão, pois não há `/dev/video*`.
-`python -m hgi` continua sendo o entrypoint mínimo que identifica o projeto.
+Interface local de visão computacional que interpreta gestos capturados por uma
+webcam para mover o cursor com **POINT** (☝) e executar um clique primário com
+**PINCH** (🤏). MediaPipe fornece os landmarks; regras geométricas e filtros
+temporais interpretam a mão. PyAutoGUI executa o controle real opcional.
 
-Requer Python **3.11 ou superior**. O bootstrap usa somente a biblioteca padrão.
-Os módulos matemáticos também usam apenas Python, com dimensões fornecidas pelo chamador.
-O extra `vision` declara MediaPipe 1.0.1, NumPy e opencv-contrib-python 5.0.0.93
-com GUI; o ambiente validado usa Python 3.11.16.
+**Dry-run é o modo padrão. Controle real exige `--real-control` + E.**
 
-## Instalação e execução
+> **Demo em preparação:** adicione uma gravação real em `assets/demo.gif`.
+> Veja [orientações para a demo](assets/README.md). Nenhum GIF artificial é incluído.
 
-Em um ambiente virtual novo, na raiz do repositório:
+## Funcionalidades
+
+- Captura OpenCV, 21 landmarks e lateralidade quando disponível.
+- Movimento com região ativa, mapeamento de coordenadas e suavização EMA.
+- Pinça normalizada, confirmação temporal, histerese e cooldown.
+- Dry-run com intenções inspecionáveis; backend real isolado e opcional.
+- Overlay com gesto bruto/estável, candidato, armamento, cursor, modo e FPS.
+- Feedback do último CLICK por 500 ms e contador de intenções da sessão.
+- Testes sintéticos sem webcam e sem movimentar o mouse real.
+
+## Gestos
+
+| Gesto | Resultado quando a sessão está habilitada |
+|---|---|
+| ☝ POINT | Move o cursor virtual ou real pela ponta do indicador |
+| 🤏 PINCH | Um clique primário no último alvo do cursor, após abertura e confirmação |
+| PINCH mantido | Nenhum clique repetido |
+| Sem mão ou outros estados | Nenhuma ação; tracking prolongadamente perdido limpa a interação |
+
+POINT exige indicador estendido e médio, anelar e mindinho recolhidos, sem pinça.
+OPEN_HAND, FIST e UNKNOWN são estados reconhecidos para neutralidade; não
+executam ações adicionais. Drag, scroll e controle de teclado não fazem parte
+desta versão.
+
+## Como funciona
+
+O frame BGR da webcam é espelhado e convertido explicitamente para RGB. O
+HandTracker adapta os resultados do MediaPipe a tipos internos. O detector
+geométrico identifica a pose e a razão de pinça. O filtro temporal confirma os
+estados e autoriza cliques. O controller mapeia o indicador da região ativa para
+a tela e aplica EMA antes de produzir MOVE, CLICK ou NONE.
+
+A seleção usa o maior `handedness_score`, com a primeira mão em empate ou ausência
+de score. Esse valor mede a classificação Left/Right, não confiança de detecção.
+Não há identidade persistente entre mãos.
+
+## Arquitetura
+
+```mermaid
+flowchart TD
+    A[Webcam / Camera] --> B[OpenCV: espelhar BGR e converter RGB]
+    B --> C[HandTracker / MediaPipe HandLandmarker]
+    C --> D[DetectedHand: landmarks internos]
+    D --> E[GestureDetector]
+    E --> F[TemporalGestureFilter]
+    F --> G[CursorController: mapeamento e EMA]
+    G --> H[CursorCommand]
+    H --> I[DryRunCursorSink]
+    H --> J[RealCursorSink / PyAutoGUI opcional]
+    B --> K[Overlay: frame BGR]
+    D --> K
+    G --> K
+    K --> L[Janela OpenCV]
+```
+
+A orquestração está em `src/hgi/webcam.py`; o desenho em `overlay.py` e os efeitos
+reais em `real_cursor.py`. Contratos, matemática e estados estão em
+[ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Modelo de segurança
+
+A sessão começa **DISABLED**, em ambos os modos. A flag seleciona o backend;
+somente E, com foco na janela OpenCV, habilita a sessão.
+
+| Modo | E pressionado | Resultado |
+|---|---|---|
+| Sem flag | Sim | Apenas intenções dry-run |
+| `--real-control` | Não | Nenhum movimento ou clique |
+| `--real-control` | Sim | Controle real após os filtros temporais |
+
+D desabilita; R reseta e desabilita; Q/Esc encerra. Ctrl+C no terminal também
+encerra com limpeza. Câmera, tracker e janelas são liberados inclusive em falhas.
+Perda de tracking interrompe comandos; após perda longa é necessária nova
+confirmação e abertura da pinça. Uma mão nunca habilita a sessão automaticamente.
+
+O **fail-safe do PyAutoGUI permanece habilitado**: leve fisicamente o mouse a
+um canto da tela primária para interromper a próxima chamada do backend.
+Falha em MOVE/CLICK trava o sink, desabilita a sessão e propaga a exceção original,
+sem retry; reinicie a demo para tentar novamente. Disable/reset não geram input.
+A pausa nativa do PyAutoGUI é preservada.
+
+As teclas D/R/Q/Esc dependem do foco da janela; comandos nativos bloqueados podem
+atrasar sua leitura. Antes de uma demo real, salve trabalhos, use uma área
+inofensiva e comece com movimentos pequenos. Consulte o
+[roteiro manual](docs/RELEASE_CHECKLIST.md#teste-manual-final).
+
+HGI não grava nem transmite frames, não envia teclas, não usa clipboard e não
+executa comandos externos. Não exige OpenAI. MediaPipe informa coleta de métricas
+pela biblioteca; veja [origem do modelo e privacidade](docs/MODELS.md).
+
+## Instalação
+
+Requer **Python >= 3.11**; o ambiente validado é Python 3.11 em Linux/X11 x86_64.
+Disponibilidade de wheels nativas varia por sistema e arquitetura.
+Na raiz de uma cópia local do repositório, usando Python 3.11:
 
 ```bash
 python -m venv .venv
@@ -23,23 +113,99 @@ python -m pip install -e ".[dev,vision]"
 python -m hgi
 ```
 
-No Windows, ative com `.venv\Scripts\Activate.ps1` no PowerShell.
-O comando imprime `HGI — Hand Gesture Interface` e encerra.
+No PowerShell, ative com `.venv\Scripts\Activate.ps1`. `python -m hgi` imprime
+a identificação do projeto e encerra; a demo é o script descrito abaixo.
+A instalação foi reproduzida num venv novo, sem aproveitar os pacotes do Conda.
+Uma sessão gráfica e webcam acessível são necessárias para a janela.
 
-No ambiente Conda existente desta máquina, use `conda activate hgi` antes dos
-comandos: o Python padrão do shell pertence ao ambiente base, não ao HGI.
+| Instalação | Finalidade |
+|---|---|
+| `python -m pip install -e .` | Núcleo e identificação, sem bibliotecas de hardware |
+| `python -m pip install -e ".[vision]"` | Demo visual em dry-run |
+| `python -m pip install -e ".[dev,vision]"` | Demo e ferramentas de desenvolvimento |
+| `python -m pip install -e ".[vision,control]"` | Demo com backend real disponível |
 
-Se pytest, pytest-cov, Ruff e setuptools já estiverem disponíveis no ambiente
-(como no Conda `hgi` inspecionado, incluindo NumPy e MediaPipe), registre somente
-este projeto, sem downloads
-ou instalação de dependências:
+`pyproject.toml` é a fonte das dependências. MediaPipe, OpenCV e PyAutoGUI têm
+versões fixadas; NumPy e ferramentas de desenvolvimento têm intervalos aceitos.
+Isso não é um lock completo das dependências transitivas. Não instale variantes
+simultâneas de OpenCV: usamos somente **opencv-contrib-python com GUI**, exigido
+também pelo MediaPipe, sem opencv-python ou headless.
+
+## Preparação do modelo
+
+O modelo não acompanha o repositório nem é baixado automaticamente. Siga
+[MODELS.md](docs/MODELS.md) para criar `models/`, obter o bundle oficial versionado
+`hand_landmarker.task` e verificar seu SHA-256 antes da primeira execução.
+O caminho pode ser externo ao repositório; arquivos `.task` são ignorados pelo Git.
+
+## Execução
+
+Execute na raiz do repositório, com o ambiente ativado e o modelo preparado.
+Os índices de câmera variam por sistema; o padrão é 0. Se 1 não abrir, tente 0.
+
+### Dry-run
 
 ```bash
-python -m pip install --no-deps --no-build-isolation --no-index -e .
-python -m hgi
+python scripts/demo_webcam.py \
+  --model models/hand_landmarker.task \
+  --camera 1
 ```
 
-## Verificações
+### Controle real
+
+Instale o extra `control` pela tabela acima e execute:
+
+```bash
+python scripts/demo_webcam.py \
+  --model models/hand_landmarker.task \
+  --camera 1 \
+  --real-control
+```
+
+O overlay diferencia **HGI | DRY-RUN** de **HGI | REAL CONTROL**, com cabeçalho
+vermelho no modo real. Ambos começam DISABLED; pressione E somente quando pronto.
+
+### Opções
+
+```bash
+python scripts/demo_webcam.py --help
+```
+
+| Opção | Significado |
+|---|---|
+| `--model` | Bundle local; padrão `models/hand_landmarker.task` |
+| `--camera` | Índice da webcam; padrão 0 |
+| `--width`, `--height` | Resolução solicitada; padrão 640×480, sujeita à câmera |
+| `--screen-width`, `--screen-height` | Devem ser fornecidas juntas; tela lógica ou override real |
+| `--real-control` | Seleciona backend real, sem habilitar a sessão |
+
+O frame efetivamente entregue determina proporção e desenho. Mudança dessas
+dimensões reseta e desabilita a sessão. Dry-run usa tela lógica 1920×1080 sem
+consultar monitor. Em modo real, o backend detecta as dimensões; overrides
+positivos não podem exceder a área detectada e usam origem (0,0). Reinicie após
+alterar monitores. Modelo ausente gera orientação para MODELS.md.
+
+### Controles da janela
+
+| Tecla | Efeito |
+|---|---|
+| E | Enable: habilita a sessão no backend selecionado |
+| D | Disable: interrompe comandos e limpa a interação |
+| R | Reset + Disable: também limpa o contador visual |
+| Q / Esc | Quit: encerra e libera recursos |
+
+Fechar a janela também encerra. D/E preservam o contador de intenções CLICK.
+O destaque de 500 ms existe somente na UI; não repete nem armazena comandos CLICK.
+
+Uma demonstração finita, sem modelo, câmera ou mouse real:
+
+```bash
+python scripts/demo_cursor.py
+```
+
+## Testes e build
+
+Com o extra `dev` instalado:
 
 ```bash
 python -m pytest -q
@@ -48,269 +214,58 @@ python -m ruff check .
 python -m ruff format --check .
 python -m compileall src
 python -m pip check
+python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
 ```
 
-O ambiente HGI agora contém somente **opencv-contrib-python 5.0.0.93**, sem
-variantes headless, com `cv2.__version__ == "5.0.0"` e GUI QT5. Não instale
-opencv-python junto: compartilham arquivos e o namespace cv2. MediaPipe exige
-contrib, que já contém os módulos principais. Na manutenção desta fase, a
-remoção inicial apagou arquivos compartilhados; foi revertida, e contrib foi
-reparado na mesma versão após nova remoção de python. Nenhuma outra dependência
-foi alterada. `pip check` e o import final passaram; detalhes no plano.
+A build acima usa o `setuptools>=68` já instalado no ambiente de build;
+`--no-build-isolation` não instala esse requisito por você. Os testes e a wheel
+foram verificados em ambientes separados. Uma build com isolamento requer acesso
+ao índice de pacotes; nesta sessão essa tentativa foi bloqueada por falha de DNS.
 
-## Demo visual com webcam — somente dry-run
+Pytest usa mãos sintéticas, clocks injetáveis e backends falsos; não abre webcam
+real nem controla mouse. Cobertura não substitui o teste manual de ergonomia.
+Resultados datados e checkpoints estão no
+[plano de implementação](docs/IMPLEMENTATION_PLAN.md#17-fase-9--polimento-e-preparação-para-portfólio).
 
-Prepare explicitamente o modelo conforme [MODELS.md](docs/MODELS.md). Na raiz,
-com o ambiente ativado e HGI instalado:
+## Decisões técnicas
 
-```bash
-python scripts/demo_webcam.py --model models/hand_landmarker.task --camera 1
-```
+- **MediaPipe Tasks Vision / IMAGE:** modelo pronto, CPU e inferência síncrona.
+- **Tipos internos:** gestos e geometria independem das utilities do MediaPipe.
+- **Geometria:** pinça dividida pela referência wrist→middle MCP, com correção
+  da proporção do frame; não depende de uma distância fixa em pixels.
+- **EMA:** reduz jitter após o mapeamento; alpha menor aumenta o atraso.
+- **Temporalidade:** confirmação de 80 ms, histerese 0.25/0.32, armamento após
+  abertura, cooldown de 300 ms e tracking grace de 150 ms.
+- **Sinks separados:** lógica produz intenções; somente o backend real realiza
+  efeitos. Arredondamento ocorre nessa fronteira, sem duplicar filtros.
 
-O caminho padrão é `models/hand_landmarker.task`. Para outro caminho/câmera ou
-dimensões solicitadas e tela lógica diferentes:
+Defaults são pontos de partida. Use o [registro de calibração](docs/CALIBRATION.md)
+para observar resultados e alterar um parâmetro por vez, sem ajustes automáticos.
 
-```bash
-python scripts/demo_webcam.py --model /caminho/hand_landmarker.task --camera 0 \
-  --width 640 --height 480 --screen-width 1920 --screen-height 1080
-```
+## Limitações
 
-Não há download automático. Modelo ausente encerra com mensagem apontando para
-MODELS.md. Em dry-run as dimensões são lógicas (1920×1080 por padrão);
-nenhum monitor real é consultado. Forneça largura e altura juntas ao sobrescrever.
-A câmera pode ignorar a resolução pedida: a integração usa `frame.shape` para
-desenho e correção de proporção das medidas. Se as dimensões entregues mudarem,
-a sessão é reiniciada DISABLED; habilite novamente com E.
+- Linux/X11 é o ambiente das verificações atuais. A consulta de tela funcionou;
+  tracking humano, movimento/clique real, FPS e latência ainda exigem aceite
+  manual, pois não há webcam acessível nesta sessão.
+- Wayland, inclusive via XWayland, é rejeitado pelo backend real; use dry-run.
+  Windows/macOS precisam de validação e permissões locais de câmera/automação.
+- Iluminação, oclusão, rotações fora do plano e câmera afetam landmarks.
+  Heurísticas não são reconhecimento universal de linguagem de sinais.
+- Thresholds e ergonomia podem variar entre pessoas e câmeras. Não há identidade
+  persistente de múltiplas mãos nem suporte avançado a múltiplos monitores.
+- `PyAutoGUI.PAUSE=0.1` foi preservado: ações frequentes podem limitar o FPS.
+  Não há medição humana de desempenho nesta sessão.
 
-| Tecla com foco na janela OpenCV | Efeito |
-|---|---|
-| E | Habilita a sessão no backend selecionado |
-| D | Desabilita e limpa a interação |
-| R | Reset da interação e contador visual, permanecendo DISABLED |
-| Q / Esc | Encerra e libera câmera, tracker e janelas |
+## Roadmap
 
-Também é possível fechar a janela. A sessão começa **DISABLED**; nenhuma mão
-a habilita automaticamente. Sem `--real-control`, E autoriza somente intenções
-em memória: nenhum mouse ou clique real ocorre e PyAutoGUI não é carregado.
-A flag antiga `--control` não é aceita. Teclas são lidas somente por
-`cv2.waitKey`, na janela da demo; HGI não envia teclas ao sistema.
-Não são gravados nem transmitidos frames pelo código HGI.
+Após o aceite do MVP: calibração guiada, avaliação de filtros de movimento,
+gestos configuráveis, ações adicionais de cursor e melhor suporte a monitores.
+Esses itens não estão implementados nesta versão.
 
-O overlay mostra modo, handedness/confiança Left/Right, RAW/STABLE, candidato,
-armamento/cooldown, razão de pinça, cursor virtual/ação e FPS. Desenha os 21
-landmarks com conexões, realça o indicador e marca a região ativa de 10% a 90%.
-`Index normalized` é a posição no frame espelhado; `screen target` é o alvo
-mapeado antes da suavização; `Cursor` é a posição virtual retida pelo controller.
-`Action` mostra somente o comando do frame atual. `Last CLICK: RECENT` e uma
-borda amarela permanecem por 500 ms após uma intenção CLICK. `Session CLICKs`
-conta as intenções desde a abertura da demo ou o último R; D/E preservam o total.
-Essa memória é somente visual: guarda contador/timestamp, sem reemitir ou reter
-um comando CLICK. O relógio da UI é separado dos gates de gesto/cooldown.
-FPS é a frequência do loop, mostrada
-com uma amostra de atraso; não é uma medição isolada de latência do modelo.
+## Release e licença
 
-O frame é espelhado **antes** da inferência; o controller usa `mirror_x=False`.
-Seleção: maior `handedness_score`, primeira mão em empate/ausência; esse score
-mede classificação Left/Right, não confiança de detecção. O tracker usa uma mão
-por padrão. Não há identidade persistente; ao trocar de mão, use R e depois E.
-As regras e thresholds das fases anteriores foram preservados.
-
-| Gesto/estado | Saída virtual quando ENABLED |
-|---|---|
-| POINT confirmado, pinça aberta | MOVE com margem e EMA |
-| PINCH confirmado, armado e fora do cooldown | Um CLICK no último alvo virtual |
-| PINCH mantido / cooldown bloqueado | NONE, sem clique pendente |
-| Sem mão / DISABLED | NONE |
-| OPEN_HAND, FIST ou UNKNOWN confirmados | NONE e limpeza do movimento |
-
-Exige webcam acessível e sessão gráfica funcional com OpenCV GUI. No Linux,
-ausência de DISPLAY/WAYLAND_DISPLAY produz erro claro antes da captura. Variável
-presente não garante conexão/driver/plugin gráfico funcional; a wheel QT5 deste
-ambiente usa X11/XWayland conforme suporte local. Windows/macOS podem exigir
-permissão de câmera. Dry-run não precisa de permissão para automação de entrada.
-Falhas de captura/inferência/desenho encerram com limpeza; geometria degenerada
-gera erro explícito, em vez de inventar um gesto. Q/Esc são processados entre
-frames; captura ou inferência nativa bloqueada pode atrasar a resposta.
-
-Validação automatizada: **403 testes**, **99% de cobertura total**, Ruff check e
-format aprovados. Testes de câmera/janela usam fakes; o overlay usa OpenCV real
-sobre arrays sintéticos sem display. POINT/PINCH foram validados sinteticamente.
-FPS real, lateralidade, ergonomia, jitter e qualidade de detecção humana ainda
-exigem webcam. IMAGE continua síncrono, sem otimização temporal do modo VIDEO.
-Veja o roteiro manual e evidências em [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
-
-## Controle real — opt-in explícito
-
-O extra opcional `control` declara PyAutoGUI **0.9.54**. No ambiente HGI atual
-ele já está instalado; nenhuma dependência foi alterada. Em ambiente novo:
-
-```bash
-python -m pip install -e ".[vision,control]"
-python scripts/demo_webcam.py \
-  --model models/hand_landmarker.task \
-  --camera 1 \
-  --real-control
-```
-
-| Execução | E na janela | Resultado |
-|---|---|---|
-| Padrão, sem flag | Sim | Apenas dry-run |
-| `--real-control` | Não | Sessão DISABLED, nenhum input |
-| `--real-control` | Sim | MOVE e CLICK reais após os gates temporais |
-
-O overlay e o título mostram **HGI | REAL CONTROL**, com cabeçalho vermelho,
-ou **HGI | DRY-RUN**; CONTROL ENABLED/DISABLED é um estado separado. A flag
-nunca habilita a sessão sozinha. D desabilita, R reseta e desabilita, Q/Esc
-encerra. Ctrl+C no terminal também encerra com limpeza. Disable/reset não
-emitem movimento nem clique. As teclas da janela exigem foco; clicar em outra
-aplicação pode retirar esse foco. O fail-safe físico continua disponível.
-
-Somente o backend consulta a resolução em modo real, uma vez ao iniciar.
-`--screen-width` **e** `--screen-height`, quando fornecidos juntos, sobrescrevem
-essa resolução com um retângulo cuja origem é (0,0); devem ser positivos e não
-exceder as dimensões detectadas. O pipeline continua recebendo somente números.
-Reinicie a demo após alterar a configuração dos monitores. Não há seleção ou
-mapeamento avançado de múltiplos monitores. Neste X11, PyAutoGUI informa
-**4480×1440**, que pode representar a superfície combinada do servidor X.
-
-`RealCursorSink(backend=None, screen_width=None, screen_height=None).emit(command)`
-implementa CursorSink. O backend pode ser injetado (`size`, `move_to`, `click`).
-MOVE encaminha as coordenadas existentes, arredondadas uma vez por `round`
-(empates para o inteiro par), sem novo smoothing, clipping ou aceleração.
-Coordenadas fora dos limites, inclusive após round, são rejeitadas antes do input.
-CLICK chama uma vez `click` primário no alvo do comando, sem MOVE adicional do
-HGI; PyAutoGUI pode reposicionar para clicar nesse alvo. NONE não chama o mouse.
-Debounce, histerese, armamento e cooldown continuam exclusivamente no filtro
-temporal. Um comando CLICK corresponde a um clique; a UI não repete comandos.
-
-`FAILSAFE=True` é garantido na construção e antes de cada ação. Mover fisicamente
-o mouse a um canto dispara o fail-safe na próxima chamada do PyAutoGUI. Uma
-falha em MOVE/CLICK, incluindo fail-safe, trava o sink, desabilita a sessão e
-propaga a exceção original, sem retry. A demo encerra e libera recursos;
-falhas simultâneas de fechamento são anexadas à exceção original como notas.
-Para tentar novamente é necessário reiniciar a demo. Não há rollback de uma
-ação que o SO já tenha recebido antes da falha.
-
-A pausa nativa `PAUSE=0.1` foi preservada, assim como outras proteções do
-fornecedor. Cada MOVE/CLICK pode acrescentar 100 ms; durante movimento contínuo
-isso limita o loop a aproximadamente 10 FPS ou menos, considerando também a
-visão. É uma estimativa pelo custo configurado, **não FPS observado**. Não foi
-reduzida a pausa para otimizar desempenho. Referência: [fail-safe e pausa do
-PyAutoGUI](https://pyautogui.readthedocs.io/en/latest/index.html#fail-safes).
-
-No Linux, o backend real usa X11 e exige acesso autorizado ao display. Wayland
-é rejeitado explicitamente, inclusive quando há XWayland; use dry-run. Variáveis
-de ambiente não garantem permissão de input. macOS pode exigir Acessibilidade;
-Windows/macOS precisam de validação manual. Não há contorno de permissões.
-
-Antes do smoke real, salve trabalhos, mantenha a janela HGI acessível e conheça
-D/R/Q/Esc/Ctrl+C e o fail-safe. Evite botões destrutivos e terminais com comandos.
-Teste nesta ordem: dry-run; real DISABLED sem E; POINT com movimentos pequenos
-nas quatro direções e D; depois dois PINCH em área inofensiva, confirmando um
-clique por pinça e nenhuma repetição ao mantê-la fechada. Registre FPS dos dois
-modos e latência percebida. Sem webcam nesta sessão, essas etapas e movimento/
-clique reais não foram testados. A consulta somente leitura ao X11 funcionou.
-
-Pytest usa backends falsos e bloqueia o carregamento do PyAutoGUI real; nenhum
-teste controla o mouse. Revisões Python/segurança e verification-loop estão
-registrados no plano. Drag, scroll, teclado, volume e extras não foram implementados.
-
-## Matemática disponível
-
-`hgi.geometry` contém pontos/regiões tipados, distância, clamp, conversões,
-espelhamento e mapeamento de uma área útil para dimensões de tela fornecidas.
-`hgi.smoothing.ExponentialSmoother(alpha)` aplica EMA em X/Y e permite reset.
-
-Nas conversões, `0.0` corresponde ao primeiro pixel e `1.0` ao último (`dimensão - 1`).
-O centro de 1920×1080 é `(959.5, 539.5)`; coordenadas fracionárias são preservadas.
-
-## HandTracker disponível
-
-Prepare um modelo local seguindo [MODELS.md](docs/MODELS.md). Não há download em runtime.
-
-```python
-import numpy as np
-
-from hgi.hand_landmarks import HandLandmark
-from hgi.hand_tracker import HandTracker
-
-frame_rgb = np.zeros((240, 320, 3), dtype=np.uint8)  # Imagem sintética sem mão.
-with HandTracker("models/hand_landmarker.task") as tracker:
-    hands = tracker.process(frame_rgb)
-    if hands:
-        hand = hands[0]
-        index_tip = hand.landmarks[HandLandmark.INDEX_FINGER_TIP]
-        print(hand.handedness, hand.handedness_score, index_tip)
-```
-
-A entrada é RGB, `uint8`, `H × W × 3`; retorno vazio é `()`. O modo IMAGE é
-síncrono e não exige timestamps. Os resultados contêm 21 pontos XYZ próprios do
-HGI. A ordem de cores depende do chamador; um array BGR não pode ser identificado
-automaticamente pelo formato. A conversão BGR→RGB ocorre explicitamente na demo;
-nenhum teste de mão humana foi realizado nesta sessão.
-
-## Reconhecimento geométrico disponível
-
-Com uma variável `hand` contendo um `DetectedHand` interno, sem importar
-bibliotecas de visão:
-
-```python
-from hgi.finger_state import GestureConfig, detect_fingers, pinch_ratio
-from hgi.gesture_detector import GestureDetector
-
-config = GestureConfig(pinch_threshold=0.25, image_aspect_ratio=640 / 480)
-detector = GestureDetector(config)
-state = detect_fingers(hand, config)
-ratio = pinch_ratio(hand, config)
-gesture = detector.detect(hand)
-```
-
-São reconhecidos UNKNOWN, POINT, PINCH, OPEN_HAND e FIST. PINCH tem prioridade,
-com distância polegar→indicador dividida pela referência wrist→middle MCP.
-As heurísticas são determinísticas por mão, sem debounce, histerese ou ações.
-O limiar inicial precisa de calibração com mãos reais; não é reconhecimento de
-linguagem de sinais. Proporção da imagem e limites geométricos estão documentados
-em [ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Cursor virtual disponível
-
-Com `hand` contendo um DetectedHand interno (ou None), a saída é uma intenção
-inspecionável em memória, sem controlar o computador:
-
-```python
-from hgi.cursor import DryRunCursorSink
-from hgi.cursor_controller import CursorConfig, CursorController
-
-sink = DryRunCursorSink()
-controller = CursorController(CursorConfig(1920, 1080), sink=sink)
-controller.enable()  # Opt-in de intenções virtuais; não habilita mouse real.
-command = controller.update(hand)
-print(command, sink.commands)
-controller.reset()
-```
-
-O controller começa DISABLED; update retorna NONE até enable explícito.
-POINT confirmado gera MOVE após área ativa, espelhamento e EMA. PINCH confirmado
-gera CLICK lógico somente após abertura/armamento e fora do cooldown. A área
-padrão vai de 0.1 a 0.9 nos dois eixos, com alpha 0.25. As dimensões são virtuais,
-fornecidas pelo chamador. `mirror_x=True` espera imagem não espelhada;
-desative-o se a entrada já foi espelhada. Reset/disable desabilitam, limpam a
-interação e preservam o log. Defaults: confirmação de 80 ms, histerese 0.25/0.32,
-cooldown de 300 ms e grace period de 150 ms. Perda breve preserva EMA e não
-rearma pinça; perda longa exige confirmação/abertura novas. Esse exemplo e a
-demo abaixo usam somente o sink virtual; o controller não consulta hardware.
-
-Para configurar ou testar tempo, injete
-`TemporalGestureFilter(TemporalConfig(...), clock=seu_clock)` no parâmetro
-`temporal` do controller; os tipos residem em `hgi.temporal`.
-
-Demo finita sem webcam, depois de instalar o HGI:
-
-```bash
-python scripts/demo_cursor.py
-```
-
-Veja os contratos e limitações em [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-e [o plano com evidências TDD](docs/IMPLEMENTATION_PLAN.md).
-O próximo passo é o aceite manual da própria Fase 8 com webcam e movimentos
-pequenos, incluindo fail-safe e foco da janela. Nenhuma fase posterior foi iniciada.
+A preparação para `v0.1.0` está em [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+A versão do pacote continua `0.1.0.dev0` até o fechamento das pendências.
+Não há `LICENSE` neste repositório: a licença depende de decisão do autor antes
+da release. MIT é uma opção a considerar para o código; não foi aplicada.
+Modelos e dependências mantêm seus próprios termos, descritos em MODELS.md.

@@ -1,4 +1,8 @@
-# Arquitetura do HGI — estado após a implementação da Fase 8
+# Arquitetura do HGI
+
+Atualizado em 30/09/2026, após o polimento da Fase 9.
+Instalação e execução: [README.md](../README.md).
+Aceite físico/release: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
 O núcleo matemático usa somente a biblioteca padrão Python. O entrypoint identifica o
 projeto e encerra. Geometria e smoothing não fazem I/O, não consultam relógio/FPS,
@@ -47,7 +51,8 @@ A região representa diretamente as margens. Por exemplo, para um frame numéric
 640×480, `Region2D(64, 48, 575, 431)` define uma área interna. Seus cantos mapeiam
 para os extremos da tela fornecida. O espelhamento ocorre **depois** de normalizar
 essa região; inverter o frame inteiro e inverter novamente o ponto seria duplicar
-o espelhamento. Essa coerência deverá ser validada na integração futura.
+o espelhamento. A demo espelha antes da inferência e usa mirror_x=False;
+a coerência numérica é testada, mas a direção física ainda exige aceite manual.
 
 Não há arredondamento antecipado nem consulta ao monitor. A conversão em posições
 inteiras é responsabilidade exclusiva do backend real. Coordenadas não
@@ -71,8 +76,8 @@ O fator é validado na construção, sem configuração global nem defaults disp
 
 Não há compensação temporal: a mesma sequência de pontos produz a mesma saída,
 mas a resposta em segundos pode variar com a frequência de chamadas. Nenhuma
-medição de FPS ou filtro adicional pertence a esta fase. Na integração futura,
-resetar após perda/troca de tracking evita reaproveitar posições antigas.
+medição de FPS ou regra temporal pertence ao smoother. O controller/filtro
+reseta após perda longa ou inatividade; troca de mão exige reset manual.
 
 ## Verificação
 
@@ -260,8 +265,8 @@ Configuração única e pequena, sem arquivo de configuração global:
 
 Booleanos não são aceitos como parâmetros numéricos. Uma referência ou segmento
 da cadeia com comprimento **≤ min_reference_distance** gera ValueError. Geometria
-inválida não se transforma em FIST/UNKNOWN nem em PINCH. O chamador futuro deverá
-exibir essa invalidez ou descartar a mão explicitamente, sem inventar landmarks.
+inválida não se transforma em FIST/UNKNOWN nem em PINCH. A demo propaga a
+falha e encerra com limpeza, sem inventar landmarks ou gestos.
 
 As heurísticas são invariantes a translação, reflexão, escala uniforme não
 degenerada e rotação no plano **depois da correção de proporção**. Oclusão,
@@ -618,9 +623,9 @@ flowchart LR
 
 `real_cursor.py` é o único módulo de produção que importa PyAutoGUI, somente no
 construtor de PyAutoGUIBackend. Importar webcam/overlay/core ou usar dry-run não
-carrega a dependência de automação. Não há efeitos ao importar ou construir o
-sink: apenas configuração e consulta de resolução. `control` é um extra opcional
-com PyAutoGUI==0.9.54; visão/dev não exigem a biblioteca. Nenhum pacote instalado
+carrega a dependência de automação. Importar não inicializa o backend. Construir
+o sink real configura fail-safe e consulta resolução, sem mover ou clicar.
+`control` é um extra opcional com PyAutoGUI==0.9.54; visão/dev não exigem a biblioteca. Nenhum pacote instalado
 foi alterado na Fase 8.
 
 | API | Contrato |
@@ -669,14 +674,14 @@ duration=0: somente a EMA existente suaviza. PAUSE=0.1 acrescenta custo por
 comando, estimando no máximo cerca de 10 Hz sob MOVE contínuo antes do custo de
 visão. Não é medição de FPS/latência real; foi documentado sem alterar defaults.
 
-REAL CONTROL aparece em vermelho no cabeçalho e no título da janela, com
+REAL CONTROL aparece em vermelho no cabeçalho e como texto no título, com
 CONTROL ENABLED/DISABLED separado. Feedback CLICK de 500 ms/contador permanece
 somente UI e recebe a ação depois de emit bem-sucedido; falha de clique não é
 contabilizada como sucesso. Fechar a pinça não cria comandos extras da UI.
 
 Limites: X11 com acesso ao servidor X; Wayland rejeitado, inclusive XWayland,
-sem contornar permissões. PyAutoGUI nesta sessão informou 4480×1440, possivelmente
-desktop combinado X11, sem identificação de monitor físico. Reiniciar após mudar
+sem contornar permissões. A resolução informada pode representar o desktop
+combinado X11, sem identificação de monitor físico. Reiniciar após mudar
 resolução/configuração. Windows/macOS precisam de teste e permissões adequadas.
 Teclas OpenCV dependem de foco; clicar fora pode retirar o foco, deixando o
 fail-safe físico e Ctrl+C no terminal como alternativas. Nenhum atalho global.
@@ -687,3 +692,22 @@ modo visual, resolução, limites/round, exatamente uma chamada, PINCH sustentad
 falhas/interrupts e fechamento simultaneamente defeituoso. Consulta X11 real foi
 somente leitura, FAILSAFE=True e PAUSE=0.1. Sem /dev/video*, smoke A–D, FPS,
 direção física, acurácia e cliques humanos continuam pendentes no plano.
+
+## Instalação e preparação para portfólio
+
+pyproject.toml é a fonte única de dependências. O núcleo não exige bibliotecas
+nativas; vision contém MediaPipe/NumPy/OpenCV GUI; control contém PyAutoGUI; dev
+contém pytest, pytest-cov, Ruff e NumPy/OpenCV para testes sintéticos. A repetição
+de NumPy/OpenCV entre extras permite rodar testes sem MediaPipe nativo. Não há
+requirements.txt duplicado. pytest-cov resolve coverage compatível com a opção
+patch subprocess; não é necessário declarar uma segunda versão independente.
+
+O pacote mínimo identifica o projeto via python -m hgi; o script de webcam é o
+entrypoint visual explícito, sem captura ao importar. A wheel contém src/hgi e
+metadados, sem modelo ou gravações. Para usar scripts e docs, mantenha uma cópia
+do repositório. A versão de desenvolvimento permanece até os gates da release.
+Não foram adicionados backends, gestos ou configuração persistente na Fase 9.
+
+Consulte [MODELS.md](MODELS.md) para origem/checksum e privacidade;
+[CALIBRATION.md](CALIBRATION.md) para observações com hardware e alteração de um
+parâmetro por vez; [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) para aceite final.
