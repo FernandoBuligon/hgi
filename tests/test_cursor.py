@@ -11,7 +11,10 @@ from hgi.gesture_detector import Gesture
 def test_commands_are_immutable_typed_intentions() -> None:
     command = CursorCommand(CursorAction.MOVE, 1200.0, 540.0, Gesture.POINT)
     assert (command.action, command.x, command.y, command.gesture) == (
-        CursorAction.MOVE, 1200.0, 540.0, Gesture.POINT
+        CursorAction.MOVE,
+        1200.0,
+        540.0,
+        Gesture.POINT,
     )
     with pytest.raises(FrozenInstanceError):
         command.x = 0.0
