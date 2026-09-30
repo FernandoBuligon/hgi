@@ -84,7 +84,9 @@ def test_point_sequence_reuses_ema_in_both_axes(hand_factory):
         controller.update(at_indicator(pose, x, y))
         for x, y in [(0.1, 0.1), (0.9, 0.9), (0.9, 0.9)]
     ]
-    assert [(c.x, c.y) for c in commands] == [(0, 0), (250, 125), (437.5, 218.75)]
+    expected = [(0, 0), (250, 125), (437.5, 218.75)]
+    for command, position in zip(commands, expected, strict=True):
+        assert (command.x, command.y) == pytest.approx(position)
 
 
 @pytest.mark.parametrize(
@@ -103,7 +105,7 @@ def test_inactivity_emits_none_and_discards_old_motion(hand_factory, pose, gestu
     idle = controller.update(None if pose is None else hand_factory(*pose))
     resumed = controller.update(at_indicator(hand_factory("index"), 0.9, 0.9))
     assert idle == CursorCommand(CursorAction.NONE, gesture=gesture)
-    assert (resumed.x, resumed.y) == (1000, 500)
+    assert (resumed.x, resumed.y) == pytest.approx((1000, 500))
     assert sink.commands[1] == idle
 
 
@@ -142,7 +144,7 @@ def test_pinch_preserves_ema_for_point_resume(hand_factory):
     controller.update(at_indicator(pose, 0.1, 0.1))
     controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
     resumed = controller.update(at_indicator(pose, 0.9, 0.9))
-    assert (resumed.x, resumed.y) == (500, 250)
+    assert (resumed.x, resumed.y) == pytest.approx((500, 250))
 
 
 def test_reset_clears_position_ema_and_pinch_edge_but_keeps_output_history(
@@ -155,9 +157,10 @@ def test_reset_clears_position_ema_and_pinch_edge_but_keeps_output_history(
     controller.update(pinched(pose))
     controller.reset()
     click = controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
-    assert (click.action, click.x, click.y) == (CursorAction.CLICK, 1000, 500)
+    assert click.action is CursorAction.CLICK
+    assert (click.x, click.y) == pytest.approx((1000, 500))
     controller.reset()
-    assert controller.update(at_indicator(pose, 0.9, 0.9)).x == 1000
+    assert controller.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
     assert len(sink.commands) == 4
 
 
@@ -176,7 +179,7 @@ def test_invalid_geometry_propagates_and_clears_previous_motion(hand_factory):
     invalid = replace(pose, landmarks=(pose.landmarks[0],) * 21)
     with pytest.raises(ValueError, match="reference"):
         controller.update(invalid)
-    assert controller.update(at_indicator(pose, 0.9, 0.9)).x == 1000
+    assert controller.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
 
 
 def test_recognition_thresholds_can_be_injected_without_mocking_logic(hand_factory):
@@ -222,4 +225,4 @@ def test_controllers_do_not_share_smoothing_state(
     first, second = CursorController(config), CursorController(config)
     pose = hand_factory("index")
     first.update(at_indicator(pose, 0.1, 0.1))
-    assert second.update(at_indicator(pose, 0.9, 0.9)).x == 1000
+    assert second.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
