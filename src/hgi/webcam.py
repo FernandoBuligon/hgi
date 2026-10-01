@@ -188,85 +188,106 @@ class WebcamPipeline:
         fps: float = 0.0,
         capture_seconds: float = 0.0,
     ) -> tuple[NDArray[np.uint8], OverlayState]:
-        """Use actual frame shape; return annotated BGR and public snapshots.
-
-        Input stays unchanged; mirroring creates the display/inference frame.
-        Unexpected inference/drawing failures disable and propagate unchanged.
-        """
+        """Prepare, sample and render; any failure disables and propagates."""
         try:
-            validate_bgr_frame(frame)
-            shape = frame.shape[:2]
-            if shape != self._shape:
-                if self._shape is not None:
-                    self._accept_after = self._performance_clock()
-                self._controller.disable()
-                self._configure(shape[1] / shape[0])
-                self._shape = shape
-                self._last_hand = None
-                self._last_result_at = None
-                self._recovering = False
-            bgr = cv2.flip(frame, 1)
-            before = self._performance_clock()
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            converted = self._performance_clock()
-            hand, fresh = self._infer(rgb)
-            inferred = self._performance_clock()
-            command = (
-                self._controller.update(hand)
-                if fresh
-                else CursorCommand(CursorAction.NONE)
-            )
-            if (
-                self._recovering
-                and self._temporal.status.stable is Gesture.UNKNOWN
-                and not self._temporal.status.armed
-            ):
-                self._recovering = False
-            observation = self._controller.observation
-            if observation is None:
-                observation = self._detector.observe(hand)
-            controlled = self._performance_clock()
-            metrics = PipelineMetrics(
-                self._tracker_config.running_mode.name,
-                self._tracker_config.delegate.name,
-                self._inference_rate.rate(controlled),
-                self._inference_ms,
-                capture_seconds * 1000,
-                (converted - before) * 1000,
-                (controlled - inferred) * 1000,
-                self._overlay_ms,
-            )
-            state = OverlayState(
-                hand,
-                observation,
-                command,
-                self._controller.state,
-                self._controller.position,
-                self._temporal.status,
-                fps,
-                self._click_feedback.update(command.action),
-                self._sink.mode,
-                metrics,
+            bgr, rgb, conversion_seconds = self._prepare(frame)
+            state, drawing_start = self._observe(
+                rgb,
+                fps=fps,
+                capture_seconds=capture_seconds,
+                conversion_seconds=conversion_seconds,
             )
             rendered = draw_overlay(bgr, state, self._config)
-            self._overlay_ms = (self._performance_clock() - controlled) * 1000
+            self._overlay_ms = (self._performance_clock() - drawing_start) * 1000
+            assert state.metrics is not None
             return rendered, replace(
-                state, metrics=replace(metrics, overlay_ms=self._overlay_ms)
+                state, metrics=replace(state.metrics, overlay_ms=self._overlay_ms)
             )
         except BaseException:
             # Cleanup only; do not turn broken inference into a missing hand.
             self._controller.disable()
             raise
 
+    def _prepare(
+        self, frame: NDArray[np.uint8]
+    ) -> tuple[NDArray[np.uint8], NDArray[np.uint8], float]:
+        """Keep source BGR unchanged and reset safely on delivered shape changes."""
+        validate_bgr_frame(frame)
+        shape = frame.shape[:2]
+        if shape != self._shape:
+            if self._shape is not None:
+                self._accept_after = self._performance_clock()
+            self._controller.disable()
+            self._configure(shape[1] / shape[0])
+            self._shape = shape
+            self._last_hand = None
+            self._last_result_at = None
+            self._recovering = False
+        bgr = cv2.flip(frame, 1)
+        before = self._performance_clock()
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        return bgr, rgb, self._performance_clock() - before
+
+    def _observe(
+        self,
+        rgb: NDArray[np.uint8],
+        *,
+        fps: float,
+        capture_seconds: float,
+        conversion_seconds: float,
+    ) -> tuple[OverlayState, float]:
+        """Sample each result once and construct public UI/timing snapshots."""
+        hand, fresh = self._infer(rgb)
+        inferred = self._performance_clock()
+        command = (
+            self._controller.update(hand) if fresh else CursorCommand(CursorAction.NONE)
+        )
+        if (
+            self._recovering
+            and self._temporal.status.stable is Gesture.UNKNOWN
+            and not self._temporal.status.armed
+        ):
+            self._recovering = False
+        observation = self._controller.observation
+        if observation is None:
+            observation = self._detector.observe(hand)
+        controlled = self._performance_clock()
+        metrics = PipelineMetrics(
+            self._tracker_config.running_mode.name,
+            self._tracker_config.delegate.name,
+            self._inference_rate.rate(controlled),
+            self._inference_ms,
+            capture_seconds * 1000,
+            conversion_seconds * 1000,
+            (controlled - inferred) * 1000,
+            self._overlay_ms,
+        )
+        return OverlayState(
+            hand,
+            observation,
+            command,
+            self._controller.state,
+            self._controller.position,
+            self._temporal.status,
+            fps,
+            self._click_feedback.update(command.action),
+            self._sink.mode,
+            metrics,
+        ), controlled
+
     def _infer(self, rgb: NDArray[np.uint8]) -> tuple[DetectedHand | None, bool]:
         """Return whether control may sample; pending results never advance EMA."""
+        if self._tracker_config.running_mode is RunningMode.LIVE_STREAM:
+            return self._live_hands(rgb)
         before = self._performance_clock()
-        if self._tracker_config.running_mode is not RunningMode.LIVE_STREAM:
-            hands = cast(FrameTracker, self._tracker).process(rgb)
-            completed = self._performance_clock()
-            self._inference_rate.tick(completed)
-            self._inference_ms = (completed - before) * 1000
-            return select_hand(hands), True
+        hands = cast(FrameTracker, self._tracker).process(rgb)
+        completed = self._performance_clock()
+        self._inference_rate.tick(completed)
+        self._inference_ms = (completed - before) * 1000
+        return select_hand(hands), True
+
+    def _live_hands(self, rgb: NDArray[np.uint8]) -> tuple[DetectedHand | None, bool]:
+        """Deliver fresh async hands or complete the existing tracking-loss path."""
         tracker = cast(LiveFrameTracker, self._tracker)
         result = tracker.poll()
         tracker.submit(rgb)
@@ -298,7 +319,7 @@ class WebcamPipeline:
             self._inference_ms = result.latency_seconds * 1000
             self._inference_rate.tick(now)
             return self._last_hand, True
-        if self._last_result_at is None or now - self._last_result_at > max_age:
+        if self._last_result_at is None:
             self._last_hand = None
             return None, True
         return self._last_hand, False

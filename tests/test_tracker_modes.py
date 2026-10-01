@@ -206,3 +206,22 @@ def test_callback_latches_the_first_exception(modes, model):
         with pytest.raises(ValueError) as second:
             tracker.poll()
         assert second.value is first.value
+
+
+@pytest.mark.parametrize("mode", list(RunningMode))
+@pytest.mark.parametrize("delegate", list(InferenceDelegate))
+def test_demo_cli_passes_typed_inference_options_without_real_opt_in(
+    monkeypatch, mode, delegate
+):
+    import runpy
+
+    import hgi.webcam as webcam
+
+    run = Mock()
+    monkeypatch.setattr(webcam, "run_webcam", run)
+    main = runpy.run_path("scripts/demo_webcam.py")["main"]
+    assert main(["--running-mode", mode.value, "--delegate", delegate.value]) == 0
+    config = run.call_args.args[0]
+    assert config.tracker.running_mode is mode
+    assert config.tracker.delegate is delegate
+    assert not config.real_control

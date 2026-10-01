@@ -19,7 +19,10 @@ from hgi.tracker_config import HandTrackerConfig, InferenceDelegate, RunningMode
 
 if TYPE_CHECKING:
     from mediapipe import Image
-    from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarkerResult
+    from mediapipe.tasks.python.vision.hand_landmarker import (
+        HandLandmarker,
+        HandLandmarkerResult,
+    )
 
 LIVE_RESULT_TIMEOUT_SECONDS = 5.0
 
@@ -135,7 +138,7 @@ class HandTracker:
         """Read-only options used at initialization, never a live mode switch."""
         return self._config
 
-    def _create_landmarker(self, path: Path):
+    def _create_landmarker(self, path: Path) -> HandLandmarker:
         mp = self._mp
         try:
             options = mp.tasks.vision.HandLandmarkerOptions(
