@@ -21,7 +21,7 @@ mudar código, dependências, versão ou ambiente depois desse registro.
 
 ## Gates manuais e decisão do autor
 
-- [ ] Smoke dry-run com webcam aprovado e registrado em CALIBRATION.md.
+- [ ] Smoke dry-run com webcam aprovado e registrado.
 - [ ] Smoke real DISABLED aprovado sem movimento/clique.
 - [ ] Movimento e clique real aprovados nas etapas abaixo.
 - [ ] FPS dry-run/real, latência, jitter e confiabilidade registrados.
@@ -78,6 +78,6 @@ Reative com E, posicione numa área inofensiva e abra a pinça para armar.
 - [ ] D interrompe; Q/Esc encerra e libera recursos.
 - [ ] Foco da janela e alternativa Ctrl+C foram compreendidos.
 
-Registre resultados e limitações em [CALIBRATION.md](CALIBRATION.md), incluindo
-FPS dos dois modos. Não marque os gates de hardware como PASS usando testes
+Registre resultados e limitações, incluindo FPS dos dois modos.
+Não marque os gates de hardware como PASS usando testes
 sintéticos. Wayland não é aceito pelo backend real atual; use dry-run.

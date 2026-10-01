@@ -17,6 +17,7 @@ temporais interpretam a mão. PyAutoGUI executa o controle real opcional.
 - Pinça normalizada, confirmação temporal, histerese e cooldown.
 - Dry-run com intenções inspecionáveis; backend real isolado e opcional.
 - Overlay com gesto bruto/estável, candidato, armamento, cursor, modo e FPS.
+- Inferência IMAGE, VIDEO ou LIVE_STREAM; CPU padrão e GPU opcional explícita.
 - Feedback do último CLICK por 500 ms e contador de intenções da sessão.
 - Testes sintéticos sem webcam e sem movimentar o mouse real.
 
@@ -178,6 +179,8 @@ python scripts/demo_webcam.py --help
 | `--width`, `--height` | Resolução solicitada; padrão 640×480, sujeita à câmera |
 | `--screen-width`, `--screen-height` | Devem ser fornecidas juntas; tela lógica ou override real |
 | `--real-control` | Seleciona backend real, sem habilitar a sessão |
+| `--running-mode` | `image` (padrão síncrono), `video` (tracking síncrono), `live-stream` (assíncrono) |
+| `--delegate` | `cpu` (padrão) ou `gpu` (opt-in; falha clara se indisponível) |
 
 O frame efetivamente entregue determina proporção e desenho. Mudança dessas
 dimensões reseta e desabilita a sessão. Dry-run usa tela lógica 1920×1080 sem
@@ -203,6 +206,40 @@ Uma demonstração finita, sem modelo, câmera ou mouse real:
 python scripts/demo_cursor.py
 ```
 
+### Performance e aceleração
+
+Para avaliar tracking entre frames, mantendo dry-run e início DISABLED:
+
+```bash
+python scripts/demo_webcam.py --model models/hand_landmarker.task \
+  --camera 1 --running-mode video --delegate cpu
+```
+
+Troque para `--running-mode live-stream` para inferência assíncrona ou use
+`--delegate gpu` para solicitar GPU. Essas opções não habilitam o mouse.
+GPU não exige instalação automática de CUDA ou drivers; suporte depende do
+pacote MediaPipe e da sessão gráfica. Uma falha indica como retornar à CPU.
+
+O overlay distingue **Loop FPS** de **Inference FPS**. Em LIVE_STREAM, somente
+resultados recentes e consumidos uma vez alimentam o controller; callbacks
+nunca executam ações. Frames ocupados são descartados, sem fila ilimitada.
+
+Benchmark explícito, sem janela, gravação ou backend de cursor:
+
+```bash
+python scripts/benchmark_hand_tracker.py --model models/hand_landmarker.task \
+  --camera 1 --delegate cpu --running-mode video --duration 15
+python scripts/benchmark_hand_tracker.py --running-mode image --duration 15
+```
+
+Sem `--camera`, o segundo comando reutiliza um frame preto sintético; o modelo
+local continua obrigatório. `--image caminho.png` usa uma imagem local
+pré-carregada; `--json` fornece dados para comparação. Não versionamos frames.
+Metodologia, matriz medida, limitações da GPU e roteiro de aceite estão em
+[PERFORMANCE.md](docs/PERFORMANCE.md). Os ensaios sem mão ficaram próximos de
+12,5 FPS na webcam; a captura dominou o tempo. Não há evidência para trocar
+automaticamente os defaults IMAGE/CPU ou alterar a pausa do PyAutoGUI.
+
 ## Testes e build
 
 Com o extra `dev` instalado:
@@ -225,11 +262,12 @@ ao índice de pacotes; nesta sessão essa tentativa foi bloqueada por falha de D
 Pytest usa mãos sintéticas, clocks injetáveis e backends falsos; não abre webcam
 real nem controla mouse. Cobertura não substitui o teste manual de ergonomia.
 Resultados datados e checkpoints estão no
-[plano de implementação](docs/IMPLEMENTATION_PLAN.md#17-fase-9--polimento-e-preparação-para-portfólio).
+[plano de implementação](docs/IMPLEMENTATION_PLAN.md#18-fase-10--real-time-performance--gpu-acceleration).
 
 ## Decisões técnicas
 
-- **MediaPipe Tasks Vision / IMAGE:** modelo pronto, CPU e inferência síncrona.
+- **MediaPipe Tasks Vision:** IMAGE/CPU preservados como baseline; VIDEO usa
+  tracking e LIVE_STREAM expõe resultados assíncronos com consumo único.
 - **Tipos internos:** gestos e geometria independem das utilities do MediaPipe.
 - **Geometria:** pinça dividida pela referência wrist→middle MCP, com correção
   da proporção do frame; não depende de uma distância fixa em pixels.
@@ -239,20 +277,22 @@ Resultados datados e checkpoints estão no
 - **Sinks separados:** lógica produz intenções; somente o backend real realiza
   efeitos. Arredondamento ocorre nessa fronteira, sem duplicar filtros.
 
-Defaults são pontos de partida. Use o [registro de calibração](docs/CALIBRATION.md)
-para observar resultados e alterar um parâmetro por vez, sem ajustes automáticos.
+Parâmetros como smoothing e thresholds podem precisar de ajuste conforme a câmera,
+a iluminação e o usuário.
 
 ## Limitações
 
-- Linux/X11 é o ambiente das verificações atuais. A consulta de tela funcionou;
-  tracking humano, movimento/clique real, FPS e latência ainda exigem aceite
-  manual, pois não há webcam acessível nesta sessão.
+- Linux/X11 é o ambiente das verificações atuais. Captura e inferência foram
+  medidas com webcam; POINT/PINCH, direção, jitter, movimento/clique real e
+  latência percebida ainda exigem aceite humano.
+- GPU inicializou na RTX 5060, mas emitiu aviso nativo sobre reutilização de
+  tensores. Isso exige investigação/aceite antes de recomendar GPU para controle.
 - Wayland, inclusive via XWayland, é rejeitado pelo backend real; use dry-run.
   Windows/macOS precisam de validação e permissões locais de câmera/automação.
 - Iluminação, oclusão, rotações fora do plano e câmera afetam landmarks.
   Heurísticas não são reconhecimento universal de linguagem de sinais.
-- Thresholds e ergonomia podem variar entre pessoas e câmeras. Não há identidade
-  persistente de múltiplas mãos nem suporte avançado a múltiplos monitores.
+- Não há identidade persistente de múltiplas mãos nem suporte avançado a múltiplos
+  monitores.
 - `PyAutoGUI.PAUSE=0.1` foi preservado: ações frequentes podem limitar o FPS.
   Não há medição humana de desempenho nesta sessão.
 
@@ -265,7 +305,6 @@ Esses itens não estão implementados nesta versão.
 ## Release e licença
 
 A preparação para `v0.1.0` está em [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
-A versão do pacote continua `0.1.0.dev0` até o fechamento das pendências.
-Não há `LICENSE` neste repositório: a licença depende de decisão do autor antes
-da release. MIT é uma opção a considerar para o código; não foi aplicada.
+O manifesto declara `0.1.0`; publicação e tag dependem do fechamento das pendências.
+O código do HGI é distribuído sob a [licença MIT](LICENSE).
 Modelos e dependências mantêm seus próprios termos, descritos em MODELS.md.

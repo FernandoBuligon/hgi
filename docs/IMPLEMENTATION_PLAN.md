@@ -6,10 +6,10 @@ Fonte de requisitos: [AGENTS.md](../AGENTS.md). O HGI é uma aplicação local
 de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
-Este documento foi criado na **Fase 0**. As Fases 1–8 foram implementadas
-conforme as autorizações posteriores do usuário, com evidências nas seções 9–16.
-A autorização atual é somente a **Fase 9 — polimento técnico, documentação e
-preparação para portfólio**, registrada na seção 17. A numeração vigente segue
+Este documento foi criado na **Fase 0**. As Fases 1–9 foram implementadas
+conforme as autorizações posteriores do usuário, com evidências nas seções 9–17.
+A autorização atual é somente a **Fase 10 — Real-time Performance & GPU
+Acceleration**, registrada na seção 18. A numeração vigente segue
 esses pedidos: Fase 6 temporalidade, Fase 7 integração visual e Fase 8 backend
 real. Não corresponde à sequência original de extras do AGENTS.md.
 Aceites com webcam e mouse humano continuam pendentes. Não há autorização para
@@ -81,13 +81,16 @@ flowchart LR
 | `real_cursor.py` | Backend PyAutoGUI isolado, coordenadas e fail-safe |
 | `click_feedback.py` | Contador/timestamp de CLICK exclusivamente na UI |
 | `overlay.py` | Landmarks, estado, região ativa, alvo virtual e feedback |
+| `tracker_config.py` | Enums/configuração de modo, delegate e limites de inferência |
+| `performance.py`, `benchmark.py` | Observabilidade do pipeline e resumos de benchmark |
 
 `scripts/demo_webcam.py` oferece argparse; `scripts/demo_cursor.py` é uma demo
 finita e sintética. Não são necessários app.py/config.py/action_controller.py
 adicionais. Configuração permanece em dataclasses por responsabilidade.
 Contratos e decisões detalhados estão em [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Decisões vigentes: MediaPipe IMAGE síncrono, CPU, uma mão por padrão e modelo
+Decisões vigentes: MediaPipe IMAGE/CPU por padrão, VIDEO e LIVE_STREAM opt-in,
+GPU explícita, uma mão por padrão e modelo
 local explícito; BGR→RGB na integração; distâncias 2D corrigidas pela proporção
 do frame; pinça normalizada por wrist→middle MCP. POINT confirmado produz MOVE
 com margem/EMA; PINCH confirmado produz um clique por fechamento armado.
@@ -119,8 +122,8 @@ incremento. Implementação automatizada concluída não substitui aceite manual
 | 6 — temporal e opt-in lógico | `temporal.py`, observações do detector e gates do CursorController; somente sink dry-run | Clock falso: confirmação, histerese, rearmamento, cooldown inclusivo/sem fila, perda curta/longa, enable/disable/reset e falhas que desabilitam | Concluída no escopo atualizado pelo usuário, seção 14. Sem hardware/automação; backend real e fail-safe ainda pendentes |
 | 7 — integração visual dry-run | `camera.py`, `webcam.py`, `overlay.py`, demo e observabilidade pública limitada | 48 testes novos sem hardware; captura/cor/RGB, seleção, overlay, temporalidade, teclas, falhas/limpeza e CLI | Implementada, com aceite manual pendente: sem /dev/video*. FPS simples autorizado. Exclusivamente DryRunCursorSink; evidências na seção 15 |
 | 8 — backend real | RealCursorSink, adaptador PyAutoGUI, flag e fail-safe | 403 testes totais; fakes sem mouse real, resolução, opt-in, limites, falhas e limpeza | Implementada conforme seção 16; consulta X11 somente leitura passou, smoke humano pendente |
-| 9 — polimento e portfólio | README, CLI, arquitetura, modelos, assets, calibração e checklist | Instalação limpa, wheel, comandos do README, revisão e suíte completa | Evidências na seção 17; licença, GIF e aceite de hardware ficam explícitos, sem tag/publicação |
-| 10 — QA do MVP | Correções necessárias, revisão final e evidências | Ruff, pytest, cobertura, compileall, revisão Python/segurança/diff e quality-gate estrito se disponível no harness; roteiro manual completo | MVP só pronto com verificações automatizadas e manuais aprovadas. Pendências de hardware serão registradas, nunca tratadas como PASS |
+| 9 — polimento e portfólio | README, CLI, arquitetura, modelos, assets e checklist | Instalação limpa, wheel, comandos do README, revisão e suíte completa | Evidências na seção 17; licença, GIF e aceite de hardware ficam explícitos, sem tag/publicação |
+| 10 — performance e GPU | Benchmark antes de alterações; VIDEO, LIVE_STREAM isolado, GPU opt-in e métricas | CPU/GPU por modo, timestamps/clocks e amostras assíncronas com fakes, suíte e wheel | Implementação e evidências na seção 18; aceite humano e performance do controle real separados |
 
 ## 5. Processo ECC e estratégia de testes
 
@@ -1419,8 +1422,8 @@ mais, árvore limpa. Baseline: 403 testes aprovados; pip check aprovado; nenhum
 Achados: resumo do plano ainda anunciava backend real futuro; README misturava
 instruções atuais e histórico de manutenção; MODELS descrevia captura ainda
 futura; CLI não explicava unidades/defaults da maioria das opções; modelos eram
-ignorados apenas no primeiro nível de models/; faltavam assets e checklists de
-calibração/release. LICENSE está ausente e depende de decisão do usuário.
+ignorados apenas no primeiro nível de models/; faltavam assets e checklist de
+release. LICENSE está ausente e depende de decisão do usuário.
 
 Não foram encontrados módulos obsoletos, imports redundantes ou dependências
 diretas sem uso. demo_cursor.py permanece útil como demonstração determinística
@@ -1429,7 +1432,7 @@ por responsabilidade, sem necessidade de arquivo global ou grande refactor.
 
 Plano: (1) polir ajuda/erro de câmera com teste de regressão RED/GREEN;
 (2) atualizar README, modelos, arquitetura e estado do plano; (3) preparar assets,
-calibração, checklist e ignore; (4) validar instalação isolada e wheel;
+checklist e ignore; (4) validar instalação isolada e wheel;
 (5) executar testes, lint, cobertura, compilação, pip check e revisões ECC.
 Preservar lógica geométrica/temporal, thresholds, sinks, opt-in e fail-safe.
 
@@ -1451,8 +1454,7 @@ sem evidência técnica. pyproject.toml permanece a fonte única de dependência
 - CLI descreve todas as opções, defaults/unidades e controles; dependências
   ausentes indicam comando de instalação. CameraError preserva a mensagem e
   sugere outro índice sem retry/autodetecção. Docstring antiga do entrypoint corrigida.
-- assets/README.md prepara demo.gif sem binário fictício. CALIBRATION.md contém
-  parâmetros reais dos construtores, tabela vazia e orientação de um ajuste por vez.
+- assets/README.md prepara demo.gif sem binário fictício.
   RELEASE_CHECKLIST.md separa checks automatizados, aceite físico e decisões do autor.
 - .gitignore protege *.task em qualquer nível e /.aws/, além dos caches, logs,
   coverage, IDE e artefatos já ignorados. Nenhum arquivo do usuário foi apagado.
@@ -1521,7 +1523,7 @@ Context7 não está exposto; consultadas fontes oficiais PyPA, página MediaPipe
 | Revisão | Resultado |
 |---|---|
 | Python/code review | APPROVE: 0 CRITICAL/HIGH; interfaces/erros/imports e diff Python revistos, Ruff passou |
-| Documentação | PASS: comandos executados, opções/defaults conferidos contra código, links/anchors válidos; API e parâmetros de calibração conferidos |
+| Documentação | PASS: comandos executados, opções/defaults conferidos contra código, links/anchors válidos; API conferida |
 | Security-review | PASS no escopo: opt-in e fail-safe preservados, efeitos isolados, ausência de novos acessos/execução externa; testes sem mouse real |
 | Verification-loop | Build sem isolamento, lint, testes/cobertura, compilação, instalação e diff PASS; build isolado limitado por DNS, hardware pendente |
 | Tipos / scanner de dependências | Revisão manual; pyright, mypy, bandit e scanner de CVEs não instalados/não executados. Ruff não substitui essas ferramentas |
@@ -1550,7 +1552,7 @@ FPS ou latência observados, nem validação física de POINT/PINCH/direção/ji
 Os resultados sintéticos não substituem o roteiro A–D.
 
 Dependem do usuário: aceite manual com webcam e mouse em área segura, medições
-e registro de calibração, demo.gif real e escolha da licença. MIT é uma opção
+e observações, demo.gif real e escolha da licença. MIT é uma opção
 para considerar; não aplicada nem criada sem autorização. Após esses gates,
 atualizar versão para 0.1.0 e revalidar testes/wheel antes de autorizar tag/release.
 O checklist está preparado, com gates físicos/decisões abertos. Nesta fase não
@@ -1561,3 +1563,161 @@ Fontes oficiais revisadas nesta fase:
 [PyPA — empacotamento](https://packaging.python.org/en/latest/tutorials/packaging-projects/),
 [MediaPipe 1.0.1 — aviso de privacidade](https://pypi.org/project/mediapipe/1.0.1/) e
 [model card Hand Tracking](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Hand%20Tracking%20%28Lite_Full%29%20with%20Fairness%20Oct%202021.pdf).
+
+## 18. Fase 10 — Real-time Performance & GPU Acceleration
+
+Autorizada somente a otimização/observabilidade da arquitetura atual, em
+30/09/2026. Não houve novos gestos/ações, mudança de thresholds, EMA, debounce,
+cooldown, PAUSE, fail-safe ou drivers. IMAGE/CPU e dry-run DISABLED permanecem
+defaults; nenhuma tag, push ou release. Licença MIT e versão 0.1.0 já estavam
+no working tree por decisões anteriores; não foram alteradas nesta fase.
+
+### Inspeção, plano e baseline
+
+Lidos integralmente AGENTS.md, plano, arquitetura, MODELS.md, README, manifesto,
+tracker, captura, webcam, overlay, temporalidade, cursor, backend real e CLI.
+API instalada e código do dispatcher/BaseOptions foram inspecionados junto do
+guia oficial, usando documentation-lookup do ECC sem Context7 disponível.
+
+Plano executado: benchmark antes da migração → VIDEO/timestamps com fakes →
+comparação CPU → investigação LIVE_STREAM/GPU → integração com amostras recentes
+→ métricas/diff/revisões → documentação e suíte/build. As variáveis de modo e
+delegate foram escolhidas explicitamente, sem mudança automática de default.
+
+Ambiente: Python 3.11.16, MediaPipe 1.0.1, contrib 5.0.0.93/cv2 5.0.0, NumPy
+2.4.6, PyAutoGUI 0.9.54; Linux Mint 22.1/Ubuntu noble, kernel 6.8.0-90-generic,
+X11. CPU i5-14600K/20 CPUs lógicas; RTX 5060/8151 MiB/driver 580.126.09.
+Modelo local com checksum esperado, sem download. Dispositivos video0/1/2 e
+GPU estavam ocultos pelo sandbox; consultas/ensaios autorizados fora dele
+confirmaram acesso. Nenhuma dependência/driver foi instalada ou atualizada.
+
+Antes de alterar o tracker, 405 testes passaram. O relato ~12 FPS foi confirmado:
+IMAGE/CPU, camera 1, 640×480, 188 frames/15,078 s, 12,47 FPS; captura 71,979 ms,
+inferência 8,103 ms, conversão 0,113 ms. Captura foi o gargalo desse ensaio.
+Frame preto pré-carregado mediu 123,07 FPS; não representa tracking humano.
+
+Matriz CPU/GPU × IMAGE/VIDEO/LIVE_STREAM foi realmente executada. Nos ensaios
+comparáveis sem mão, webcam ficou em 12,33–12,54 FPS, sem ganho de throughput
+relevante de GPU. Um ensaio exploratório CPU/LIVE_STREAM com 267 frames com mão
+mediu 20,77 FPS, mas a captura/cena mudaram; não comprova ganho causal de async.
+FPS informado pelo driver: 25; taxa efetiva sem mão: ~12,5.
+
+Metodologia, contagens, médias, p95, pior frame, latência aproximada e matriz
+completa estão em [PERFORMANCE.md](PERFORMANCE.md). Não foram inventados dados
+para GPU/IMAGE de fonte fixa, resolução maior ou controle real.
+
+### Implementação e fronteiras
+
+- HandTrackerConfig imutável centraliza modos/delegates e confidences.
+  IMAGE/VIDEO preservam process(RGB); keywords antigos continuam aceitos sem config.
+- VIDEO usa ms int64 crescentes. Clock monotônico injetável; mesmo tick automático
+  usa anterior+1; números inválidos/decréscimos são rejeitados antes da inferência.
+- LIVE_STREAM usa submit/poll: uma inferência em voo, um resultado imutável,
+  None pendente distinto de hands=() ausente. Nenhuma fila ilimitada ou cursor
+  dentro do callback. Lock curto; close/inferência nativos fora do lock.
+- Erros de adaptação chegam ao owner; primeira exceção é preservada. Dispatcher
+  1.0.1 pode apenas logar erro nativo; ausência de callback por 5 s gera erro claro.
+- Pipeline consome cada resultado uma vez. Idade/dimensões/último opt-in são
+  verificadas. Stall completa a perda de tracking pelo filtro existente antes de
+  aceitar mãos; exige abertura para rearmar. Pending redesenha sem emitir/EMA.
+- CLI oferece --running-mode image/video/live-stream e --delegate cpu/gpu.
+  GPU é opt-in e erro de inicialização sugere CPU, preservando a causa, sem fallback.
+- Loop FPS é separado de Inference FPS; PipelineMetrics mede conversão,
+  inferência, controller/sink, captura e overlay com perf_counter da aplicação.
+  Métodos de preparação/observação foram separados para manter o loop legível.
+- Benchmark usa câmera explícita, imagem local pré-carregada ou frame sintético,
+  warmup/duração configuráveis e JSON opcional. Nunca constrói backend de cursor
+  ou janela; seu async serial inclui polling, diferente da demo com descarte.
+
+Criados: tracker_config.py, performance.py, benchmark.py, benchmark_hand_tracker.py,
+test_tracker_modes.py, test_live_pipeline.py, test_performance.py,
+test_benchmark.py, test_benchmark_cli.py e PERFORMANCE.md.
+Modificados: hand_tracker.py, camera.py, webcam.py, overlay.py, demo_webcam.py,
+test_camera.py, README.md, ARCHITECTURE.md, este plano e a nota de hardware em
+MODELS.md. Alterações preexistentes de outros arquivos foram preservadas.
+CursorController, TemporalGestureFilter, RealCursorSink, geometria, gestos,
+smoothing e lógica do feedback CLICK não tiveram código alterado.
+
+### TDD, regressões e checkpoints
+
+52 casos novos, 457 no total. Testes usam fronteiras MediaPipe/câmera falsas,
+clocks injetáveis e backends de mouse falsos; nenhum teste controla mouse real.
+
+| Garantia | Evidência RED → GREEN |
+|---|---|
+| Resumo de tempos/throughput/percentil e duração inválida | test_benchmark.py: módulo ausente → 6 passaram |
+| VIDEO/CPU/GPU, opções, ms, ausência, tipos internos e erros | test_tracker_modes.py: config ausente → 47 passaram junto dos 26 contratos antigos |
+| Callback consumido uma vez, mailbox limitado, shutdown e falhas | 3 falhas por API async ausente → 50 passaram com contratos antigos |
+| Integração pending/fresh e clocks separados | 4 falhas por opções da integração ausentes → integração GREEN |
+| Primeiro erro assíncrono preservado | RED substituía ValueError original → teste passou após latch da primeira exceção |
+| E repetido continua idempotente | RED descartava amostra em voo → teste passou sem reiniciar barreira |
+| Stall não aproveita armamento antigo | RED emitiu CLICK após perda → NONE até recuperação e nova abertura; teste passou |
+| FPS do driver é apenas metadata | 3 falhas por propriedade ausente → 3 passaram |
+| CLI e benchmark seguros/configurados | Fakes verificam modos/delegates, dry-run, modelo ausente, help e fechamento |
+
+RED/GREEN foram executados antes das implementações correspondentes; algumas
+ampliações de revisão foram verificadas diretamente. Checkpoints Git foram
+consolidados após GREEN, sem fabricar commits RED retroativos:
+
+- `b2a4cb8`: modos/delegates, benchmark e amostragem segura; 451 testes passaram.
+- `5a06937`: separar preparação/observação, tipos privados e CLI; 39 testes
+  relacionados passaram, seguidos da suíte final de 457.
+- `b08cb48`: documentação das medições CPU/GPU, metodologia e aceite pendente.
+
+### Verificação final e revisões ECC
+
+Interpretador dos comandos: /home/syl/miniconda3/envs/hgi/bin/python.
+
+| Comando/revisão | Resultado real |
+|---|---|
+| python -m pytest -q | 457 passed |
+| python -m pytest --cov=hgi --cov-report=term-missing | 457 passed, 98% total; HandTracker 97%, config/observabilidade 100% |
+| python -m ruff check . | All checks passed |
+| python -m ruff format --check . | 55 files already formatted |
+| python -m compileall src | PASS |
+| python -m pip check | No broken requirements found |
+| python -m pip wheel --no-deps --no-build-isolation --wheel-dir /tmp/hgi-phase10-wheel . | hgi-0.1.0-py3-none-any.whl, PASS |
+| Instalar wheel sem rede/deps num venv novo em /tmp/hgi-phase10-clean | PASS; import usa site-packages desse venv |
+| python -m hgi e os dois --help | PASS no ambiente normal e venv limpo sem extras nativos |
+| Benchmarks sintéticos/nativos | CPU e GPU produziram resultados; detalhes/avisos em PERFORMANCE.md |
+| git diff --check | PASS |
+| python-reviewer e code review inline | 0 CRITICAL/HIGH no código alterado; tipagem pública, ciclo de vida, concorrência e diff revisados |
+| security-review inline | Opt-in, fail-safe, exceções e ausência de efeitos no benchmark preservados; busca de segredos sem correspondências |
+| verification-loop | Build, lint, testes/cobertura, imports/deps, segurança e diff PASS; aceite físico separado |
+| Type checker / CVEs | pyright, mypy e bandit ausentes; tipos revistos manualmente, scanner de CVEs não executado |
+
+Wheel SHA-256: a308180df04052bdef0841bbabeaafa139830f59522b0ba970282f82713814c2.
+Venv limpo recebeu somente HGI; help/identificação funcionam sem cv2, NumPy,
+MediaPipe ou PyAutoGUI. Instalação completa de extras já tinha evidência na Fase 9;
+nenhuma atualização de pacotes do ambiente principal foi necessária nesta fase.
+Não se forçou cobertura de chamadas nativas nem assertions de FPS em pytest.
+
+### Segurança, limites e próximo aceite
+
+Dry-run + E continua sem efeitos reais; --real-control sem E continua DISABLED.
+FAILSAFE=True e PAUSE=0.1 foram preservados. Sem callbacks de cursor, novas
+ações, teclado global, clipboard, comandos externos, captura persistida ou envio
+de frames no código HGI. PyAutoGUI só é importado pelo backend real. Nenhum
+mouse real foi movido/clicado no pytest ou nos benchmarks desta fase.
+
+GPU inicializou EGL/OpenGL ES na RTX 5060 nos três modos, mas emitiu aviso
+tensor.cc:411 de múltiplas escritas/sincronização. Não está homologada com mão
+humana; não se declarou aceleração melhor ou correção garantida. Overlay
+sintético custou ~0,248 ms; perfil ocorreu junto de outro ensaio, sem comparação
+controlada de regressão. PAUSE sugere teto matemático ~10 ações/s antes dos demais
+custos; FPS real-control não foi medido. Async pode rejeitar resultados se pausa
+e captura ultrapassarem o limite de idade: precisa de aceite específico.
+
+Janela/gestos físicos/latência percebida/jitter/cliques humanos não foram
+homologados. O servidor interrompeu a sessão antes do smoke visual planejado;
+ele não foi registrado como PASS. Benchmarks de câmera/inferência já concluídos
+foram preservados. Foi solicitado aceite ao usuário nesta ordem: CPU IMAGE,
+CPU VIDEO, CPU LIVE_STREAM, GPU VIDEO, GPU LIVE_STREAM, em dry-run.
+O usuário confirmou que fará essa comparação em dry-run, com câmera, resolução
+e iluminação iguais; controle real não é necessário para o aceite desta fase.
+O impacto físico da PAUSE fica pendente de avaliação futura, sem ajuste agora.
+
+Recomendação provisória: IMAGE/CPU como default; VIDEO/CPU como próximo candidato
+com mão estável, LIVE_STREAM experimental e GPU opt-in. Meta 24–25 FPS depende
+da captura efetiva e não foi declarada atingida. Nenhuma funcionalidade adicional,
+tag, push ou publicação foi iniciada.

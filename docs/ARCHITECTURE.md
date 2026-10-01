@@ -1,6 +1,6 @@
 # Arquitetura do HGI
 
-Atualizado em 30/09/2026, após o polimento da Fase 9.
+Atualizado em 30/09/2026, na Fase 10 de performance e delegates explícitos.
 Instalação e execução: [README.md](../README.md).
 Aceite físico/release: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
@@ -92,7 +92,7 @@ e gestos operam exclusivamente sobre mãos sintéticas internas, sem mocks.
 ```mermaid
 flowchart LR
     A[Array RGB uint8] --> B[HandTracker]
-    B --> C[MediaPipe HandLandmarker IMAGE]
+    B --> C[MediaPipe HandLandmarker IMAGE / VIDEO / LIVE_STREAM]
     C --> D[Conversão no adaptador]
     D --> E[tuple de DetectedHand do HGI]
 ```
@@ -103,12 +103,26 @@ Entradas inválidas geram TypeError/ValueError antes da inferência. Arrays stri
 são tornados contíguos; RGB e entrada são preservados. Não se pode inferir RGB
 versus BGR apenas por dtype/shape: a conversão pertence à integração webcam.py.
 
-`HandTracker(model_path, *, num_hands=1, min_hand_detection_confidence=0.5,
-min_hand_presence_confidence=0.5)` configura CPU e **IMAGE** síncrono. Modelo
-local obrigatório; detector criado uma vez e reutilizado. Veja [MODELS.md](MODELS.md).
-A mudança da proposta VIDEO para IMAGE simplifica esta fase de um frame: não há
-timestamps ou estado temporal. VIDEO/LIVE_STREAM poderão ser avaliados depois;
-o IMAGE não usa o tracking temporal que reduz a latência nesses modos.
+`HandTracker(model_path, *, config=HandTrackerConfig(), clock=monotonic,
+performance_clock=perf_counter)` reutiliza um detector e exige modelo local.
+Veja [MODELS.md](MODELS.md). Os keywords antigos de mãos/confidence continuam
+aceitos quando `config` é omitido; misturar as duas fontes é rejeitado.
+`tracker_config.py` centraliza enums RunningMode/InferenceDelegate e limites
+de detecção, presença e tracking. Defaults permanecem **IMAGE/CPU**.
+
+IMAGE chama `detect`; VIDEO chama `detect_for_video`, mantendo `process(frame)`.
+VIDEO também aceita `timestamp_ms` explícito: inteiro não negativo, int64 e
+estritamente crescente. Sem timestamp, o tracker converte segundos monotônicos
+em ms; chamadas dentro do mesmo tick usam anterior+1. Clock regressivo/inválido
+é rejeitado. Esse relógio não é passado ao filtro temporal dos gestos.
+VIDEO e LIVE_STREAM podem aproveitar tracking do MediaPipe, conforme o
+[guia oficial](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python).
+
+LIVE_STREAM separa `submit(frame)` de `poll()`. Há uma inferência em voo e um
+resultado pendente; submit retorna False quando ocupado. O callback converte
+para LiveResult imutável, com mãos HGI, timestamp, dimensões e instantes de
+submissão/conclusão. poll consome uma vez: None é pendente, hands=() é ausência.
+Não há fila de frames nem ações de cursor no callback.
 
 Retorno: `tuple[DetectedHand, ...]`, com `()` significando ausência normal de mão.
 Não há identidade persistente ou garantia de ordem entre frames. Se houver
@@ -122,6 +136,9 @@ Resultados malformados não são convertidos em ausência: são rejeitados.
 | `NormalizedLandmark(x, y, z)` | Dataclass imutável; XYZ finitos; mantém a previsão sem clipping |
 | `DetectedHand(landmarks, handedness=None, handedness_score=None)` | Tuple imutável com exatamente 21 pontos; lateralidade Left/Right opcional; score finito em 0..1 quando disponível |
 | `HandTracker.process(frame)` | Converte todos os resultados para tipos HGI; nunca expõe objetos MediaPipe |
+| `HandTrackerConfig(...)` | Configuração imutável de modo, delegate, máximo de mãos e confidences |
+| `HandTracker.submit(frame, timestamp_ms=None)` | Exclusivo LIVE_STREAM; uma inferência em voo, sem backlog |
+| `HandTracker.poll()` | Exclusivo LIVE_STREAM; consome LiveResult novo uma vez ou retorna None |
 | `HandTracker.close()` / `with HandTracker(...)` | Fechamento explícito ou automático, inclusive sob exceção; close bem-sucedido é idempotente |
 
 X/Y são normalizados pelas dimensões da imagem; Z é profundidade relativa ao
@@ -135,8 +152,18 @@ Falhas de importação, criação, inferência e fechamento conhecidas geram
 `HandTrackerError` com `__cause__` original. Erros inesperados propagam.
 Um tracker fechado rejeita processamento e reentrada; um close que falhar pode
 ser tentado novamente. Não há supressão de exceções no context manager, captura,
-desenho, callbacks, gestos, smoothing no pipeline ou automação. O tracker não é
-thread-safe; neste incremento deve ser usado sequencialmente.
+desenho, gestos, smoothing no pipeline ou automação. Métodos públicos usam uma
+única thread proprietária. Um Lock protege somente mailbox/erro/estado do callback;
+nenhum lock é mantido durante inferência ou close nativo, que espera callbacks.
+Falhas do callback são retidas e propagadas pela thread proprietária, sem novas
+submissões; preserva-se a primeira exceção. O pacote 1.0.1 apenas loga certos
+erros assíncronos nativos: uma submissão sem callback por 5 s falha explicitamente.
+Fechamento rejeita callbacks tardios e elimina resultados pendentes.
+
+GPU é escolhida somente em BaseOptions, dentro do tracker. Falha de criação
+preserva a causa e sugere `--delegate cpu`; não há fallback silencioso,
+instalação de drivers ou dependência de GPU nos gestos/geometria/cursor.
+Disponibilidade do enum não garante funcionamento ou qualidade do delegate.
 
 Os testes substituem somente a fronteira MediaPipe, processando arrays sintéticos
 e resultados externos falsos através da conversão real. O smoke com modelo real
@@ -500,7 +527,7 @@ flowchart LR
     A[Webcam] --> B[Camera: BGR uint8]
     B --> M[OpenCV: espelhar BGR]
     M --> C[OpenCV: BGR para RGB]
-    C --> T[HandTracker: IMAGE / CPU]
+    C --> T[HandTracker: modo / delegate configuráveis]
     T --> H[DetectedHand: seleção]
     H --> G[GestureDetector]
     G --> F[TemporalGestureFilter]
@@ -557,6 +584,12 @@ também a observação. Não há acesso aos campos privados do filtro pelo overl
 FPS usa monotonic na aplicação, separado do clock do filtro. É 1/intervalo entre
 iterações e aparece com uma amostra de atraso (primeira: zero). Inclui captura,
 inferência e trabalho de exibição anterior; não prova latência ponta a ponta.
+Na Fase 10 esse valor recebe o nome Loop FPS. Inference FPS conta resultados
+recentes entregues ao pipeline numa janela de um segundo, inclusive ausência
+normal de mão, sem contar redraws pendentes. PipelineMetrics usa perf_counter
+separado para conversão, inferência, controller/sink e overlay; captura é medida
+no loop. Em LIVE_STREAM o tempo de inferência é submissão→callback, incluindo
+adaptação e scheduling; nos modos síncronos é duração de process().
 O sink virtual da demo usa deque(maxlen=1); o default público continua sem limite para
 compatibilidade com os testes/demos finitas anteriores.
 
@@ -599,11 +632,34 @@ ou gravação/transmissão de frames no código HGI.
 
 Teste normal usa frames sintéticos, fake tracker/captura/janela e geometria,
 temporalidade, sink e desenho reais. Native OpenCV sobre arrays não exige display.
-Teste humano está pendente pela ausência de /dev/video*. IMAGE não aproveita
-tracking temporal de VIDEO; FPS real e ergonomia não foram homologados.
+Captura/inferência reais foram medidas na Fase 10, conforme PERFORMANCE.md;
+gestos humanos, qualidade, ergonomia e controle físico continuam pendentes.
 Plugins/display ou drivers nativos defeituosos podem falhar fora das exceções
 Python. Q/Esc são lidos entre frames; bloqueio nativo de captura/inferência pode
 atrasar encerramento. Nenhum threshold foi recalibrado ou feature extra adicionada.
+
+### Consumo assíncrono da Fase 10
+
+O loop da janela continua sequencial. Em LIVE_STREAM, WebcamPipeline faz poll
+e tenta submit do RGB atual. Quando há resultado novo, aplica exatamente um
+update do controller. Enquanto pendente, apenas redesenha informação recente
+com Action NONE; não emite, filtra ou suaviza novamente a mesma mão.
+Resultado sem mão continua sendo uma amostra válida e chama update(None).
+
+Amostras de dimensões incompatíveis, anteriores ao último enable/disable/reset
+ou com idade desde a submissão superior ao tracking grace (default 150 ms) não
+autorizam ações. Após silêncio maior que esse limite, usa ausência de mão para
+o caminho normal de tracking perdido. A integração entrega ausência até o
+status público do filtro estar UNKNOWN/desarmado; só então aceita novas mãos,
+exigindo nova abertura para clique. O relógio de gesto, cooldown e thresholds
+não são alterados ou resetados por essa recuperação.
+E repetido numa sessão habilitada permanece idempotente; D/R/Q desabilitam
+antes de aceitar outra amostra. Troca de dimensões também reinicia a barreira.
+Cursor e PyAutoGUI são executados somente pela thread principal após opt-in;
+o callback nunca acessa controller, sink, overlay ou estado temporal.
+
+Medições e benchmarks, incluindo limitações do timeout nativo e diferenças
+entre benchmark serial e demo assíncrona, estão em [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Backend real da Fase 8
 
@@ -709,5 +765,4 @@ do repositório. A versão de desenvolvimento permanece até os gates da release
 Não foram adicionados backends, gestos ou configuração persistente na Fase 9.
 
 Consulte [MODELS.md](MODELS.md) para origem/checksum e privacidade;
-[CALIBRATION.md](CALIBRATION.md) para observações com hardware e alteração de um
-parâmetro por vez; [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) para aceite final.
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) para aceite final.
