@@ -28,6 +28,8 @@ class CursorAction(Enum):
 
     MOVE = "MOVE"
     CLICK = "CLICK"
+    MOUSE_DOWN = "MOUSE_DOWN"
+    MOUSE_UP = "MOUSE_UP"
     NONE = "NONE"
 
 
@@ -35,9 +37,9 @@ class CursorAction(Enum):
 class CursorCommand:
     """Immutable intention in logical screen pixels, retaining subpixels.
 
-    MOVE/CLICK require finite, nonnegative X/Y. NONE has no position. Screen
-    upper bounds belong to the controller, which knows the supplied dimensions.
-    An optional gesture records provenance without invoking any external action.
+    MOVE/CLICK/MOUSE_DOWN/MOUSE_UP require finite, nonnegative X/Y. NONE has no
+    position. Screen upper bounds belong to the controller. An optional gesture
+    records provenance without invoking any external action.
     """
 
     action: CursorAction
@@ -55,7 +57,7 @@ class CursorCommand:
                 raise ValueError("NONE must not contain a position")
             return
         if self.x is None or self.y is None:
-            raise ValueError("MOVE and CLICK require both position coordinates")
+            raise ValueError("Cursor actions require both position coordinates")
         Point2D(self.x, self.y)
         if any(isinstance(value, bool) or value < 0 for value in (self.x, self.y)):
             raise ValueError("Cursor coordinates must be nonnegative numbers")

@@ -29,6 +29,14 @@ class MouseBackend(Protocol):
         """Perform one primary click at the supplied integer pixels."""
         ...
 
+    def mouse_down(self, x: int, y: int) -> None:
+        """Press the primary button at the supplied integer pixels."""
+        ...
+
+    def mouse_up(self, x: int, y: int) -> None:
+        """Release the primary button at the supplied integer pixels."""
+        ...
+
 
 class PyAutoGUIBackend:
     """Lazy PyAutoGUI adapter with FAILSAFE enabled and PAUSE unchanged.
@@ -70,6 +78,16 @@ class PyAutoGUIBackend:
             x, y, clicks=1, button="primary", duration=0.0, logScreenshot=False
         )
 
+    def mouse_down(self, x: int, y: int) -> None:
+        """Press the primary button; release is guaranteed by the caller/sink."""
+        self._api.FAILSAFE = True
+        self._api.mouseDown(x, y, button="primary", duration=0.0, logScreenshot=False)
+
+    def mouse_up(self, x: int, y: int) -> None:
+        """Release the primary button with native fail-safe/pause preserved."""
+        self._api.FAILSAFE = True
+        self._api.mouseUp(x, y, button="primary", duration=0.0, logScreenshot=False)
+
 
 class RealCursorSink:
     """Translate each MOVE/CLICK once; NONE has no device effect.
@@ -100,6 +118,8 @@ class RealCursorSink:
         if self._width > width or self._height > height:
             raise ValueError("Screen override exceeds detected screen bounds")
         self._failed = False
+        self._button_down = False
+        self._last_coordinates = (0, 0)
 
     @property
     def mode(self) -> CursorMode:
@@ -146,10 +166,27 @@ class RealCursorSink:
             raise RealCursorError("Real cursor stopped after failure; restart demo")
         try:
             x, y = self._coordinates(command)
+            self._last_coordinates = (x, y)
             if command.action is CursorAction.MOVE:
                 self._backend.move_to(x, y)
             elif command.action is CursorAction.CLICK:
                 self._backend.click(x, y)
+            elif command.action is CursorAction.MOUSE_DOWN:
+                self._button_down = True
+                self._backend.mouse_down(x, y)
+            elif command.action is CursorAction.MOUSE_UP:
+                self._backend.mouse_up(x, y)
+                self._button_down = False
         except BaseException:
+            self._release_after_failure()
             self._failed = True
             raise
+
+    def _release_after_failure(self) -> None:
+        if not self._button_down:
+            return
+        self._button_down = False
+        try:
+            self._backend.mouse_up(*self._last_coordinates)
+        except BaseException:
+            pass

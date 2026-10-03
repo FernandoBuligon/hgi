@@ -82,24 +82,50 @@ def test_tracking_gap_freezes_output_preserves_ema_then_long_loss_resets_it(
     assert resumed.action is CursorAction.MOVE and resumed.x == pytest.approx(1000)
 
 
-def test_pinch_uses_last_smoothed_position_once_and_short_loss_does_not_rearm(
+def test_pinch_holds_button_moves_while_pinched_and_releases_on_exit(
     hand_factory, fake_clock
 ):
     controller = make_controller(fake_clock)
     point = at_indicator(hand_factory("index"), 0.3, 0.4)
     establish_point(controller, fake_clock, point)
-    last = controller.sink.commands[-1]
     pinch = pinched(at_indicator(hand_factory("index"), 0.8, 0.8))
     fake_clock.now = 0.1
     assert controller.update(pinch).action is CursorAction.NONE
     fake_clock.now = 0.18
-    click = controller.update(pinch)
-    assert click.action is CursorAction.CLICK and (click.x, click.y) == (last.x, last.y)
+    down = controller.update(pinch)
+    assert down.action is CursorAction.MOUSE_DOWN
     fake_clock.now = 0.2
-    controller.update(None)
+    drag = controller.update(at_indicator(pinch, 0.9, 0.9))
+    assert drag.action is CursorAction.MOVE
+    fake_clock.now = 0.36
+    assert controller.update(at_indicator(point, 0.9, 0.9)).action is CursorAction.MOVE
+    fake_clock.now = 0.44
+    up = controller.update(at_indicator(point, 0.9, 0.9))
+    assert up.action is CursorAction.MOUSE_UP
+    actions = [c.action for c in controller.sink.commands]
+    assert actions.count(CursorAction.MOUSE_DOWN) == 1
+    assert actions.count(CursorAction.MOUSE_UP) == 1
+
+
+def test_short_loss_keeps_mouse_down_and_long_loss_releases_it(
+    hand_factory, fake_clock
+):
+    controller = make_controller(fake_clock)
+    point = hand_factory("index")
+    establish_point(controller, fake_clock, point)
+    pinch = pinched(point)
+    fake_clock.now = 0.1
+    controller.update(pinch)
+    fake_clock.now = 0.18
+    assert controller.update(pinch).action is CursorAction.MOUSE_DOWN
+    fake_clock.now = 0.2
+    assert controller.update(None).action is CursorAction.NONE
     fake_clock.now = 0.24
-    assert controller.update(pinch).action is CursorAction.NONE
-    assert [c.action for c in controller.sink.commands].count(CursorAction.CLICK) == 1
+    assert controller.update(pinch).action is CursorAction.MOVE
+    fake_clock.now = 0.4
+    controller.update(None)
+    fake_clock.now = 0.56
+    assert controller.update(None).action is CursorAction.MOUSE_UP
 
 
 def test_long_tracking_loss_discards_pinch_until_confirmed_release(
@@ -111,21 +137,21 @@ def test_long_tracking_loss_discards_pinch_until_confirmed_release(
     fake_clock.now = 0.1
     controller.update(pinch)
     fake_clock.now = 0.18
-    assert controller.update(pinch).action is CursorAction.CLICK
+    assert controller.update(pinch).action is CursorAction.MOUSE_DOWN
     fake_clock.now = 0.2
     controller.update(None)
     fake_clock.now = 0.36
     controller.update(None)
     for now in (0.4, 0.48, 0.5):
         fake_clock.now = now
-        assert controller.update(pinch).action is CursorAction.NONE
+        assert controller.update(pinch).action is not CursorAction.MOUSE_DOWN
     for now in (0.6, 0.68):
         fake_clock.now = now
         controller.update(point)
     for now in (0.7, 0.78):
         fake_clock.now = now
         command = controller.update(pinch)
-    assert command.action is CursorAction.CLICK
+    assert command.action is CursorAction.MOUSE_DOWN
 
 
 def test_disable_cancels_pending_click_and_reenable_starts_unarmed(
@@ -145,7 +171,9 @@ def test_disable_cancels_pending_click_and_reenable_starts_unarmed(
     controller.update(pinch)
     fake_clock.now = 1.1
     assert controller.update(pinch).action is CursorAction.NONE
-    assert all(c.action is not CursorAction.CLICK for c in controller.sink.commands)
+    assert all(
+        c.action is not CursorAction.MOUSE_DOWN for c in controller.sink.commands
+    )
 
 
 def test_reenable_discards_ema_and_reset_disables_without_emitting(

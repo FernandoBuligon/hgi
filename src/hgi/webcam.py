@@ -27,6 +27,14 @@ from hgi.hand_tracker import HandTracker, LiveResult
 from hgi.overlay import OverlayState, draw_overlay
 from hgi.performance import PipelineMetrics, RateMeter
 from hgi.real_cursor import RealCursorSink
+from hgi.system_actions import (
+    ActionConfig,
+    ActionResult,
+    ActionSink,
+    DryRunActionSink,
+    GestureActionController,
+    RealActionSink,
+)
 from hgi.temporal import TemporalConfig, TemporalGestureFilter
 from hgi.tracker_config import HandTrackerConfig, RunningMode
 
@@ -67,6 +75,8 @@ class DemoConfig:
     screen_height: int | None = None
     real_control: bool = False
     tracker: HandTrackerConfig = HandTrackerConfig()
+    screenshot_directory: Path = ActionConfig().screenshot_directory
+    spotify_track_uri: str = ActionConfig().spotify_track_uri
 
     def __post_init__(self) -> None:
         normalized_to_pixels(Point2D(0, 0), self.frame_width, self.frame_height)
@@ -78,6 +88,10 @@ class DemoConfig:
             raise ValueError("real_control must be an explicit boolean")
         if not isinstance(self.tracker, HandTrackerConfig):
             raise ValueError("tracker must be a HandTrackerConfig")
+        ActionConfig(
+            screenshot_directory=self.screenshot_directory,
+            spotify_track_uri=self.spotify_track_uri,
+        )
         if (
             isinstance(self.camera_index, bool)
             or not isinstance(self.camera_index, int)
@@ -105,6 +119,17 @@ def configure_output(
         width = config.screen_width if config.screen_width is not None else 1920
         height = config.screen_height if config.screen_height is not None else 1080
     return CursorConfig(width, height, mirror_x=False), sink
+
+
+def configure_action_output(config: DemoConfig) -> tuple[ActionSink, ActionConfig]:
+    """Choose non-cursor output; real backends are still lazy per action."""
+    action_config = ActionConfig(
+        screenshot_directory=config.screenshot_directory,
+        spotify_track_uri=config.spotify_track_uri,
+    )
+    if config.real_control:
+        return RealActionSink(action_config), action_config
+    return DryRunActionSink(max_history=1), action_config
 
 
 def select_hand(hands: tuple[DetectedHand, ...]) -> DetectedHand | None:
@@ -136,6 +161,8 @@ class WebcamPipeline:
         config: CursorConfig,
         *,
         sink: DryRunCursorSink | RealCursorSink | None = None,
+        action_sink: ActionSink | None = None,
+        action_config: ActionConfig | None = None,
         clock: Callable[[], float] = monotonic,
         ui_clock: Callable[[], float] = monotonic,
         tracker_config: HandTrackerConfig | None = None,
@@ -162,6 +189,12 @@ class WebcamPipeline:
         self._click_feedback = ClickFeedback(clock=ui_clock)
         self._shape: tuple[int, int] | None = None
         self._sink = sink if sink is not None else DryRunCursorSink(max_history=1)
+        default_action_sink = DryRunActionSink(max_history=1)
+        self._actions = GestureActionController(
+            action_config,
+            sink=action_sink if action_sink is not None else default_action_sink,
+            clock=clock,
+        )
         self._configure(1.0)
 
     def _configure(self, aspect: float) -> None:
@@ -206,6 +239,7 @@ class WebcamPipeline:
         except BaseException:
             # Cleanup only; do not turn broken inference into a missing hand.
             self._controller.disable()
+            self._actions.reset()
             raise
 
     def _prepare(
@@ -218,6 +252,7 @@ class WebcamPipeline:
             if self._shape is not None:
                 self._accept_after = self._performance_clock()
             self._controller.disable()
+            self._actions.reset()
             self._configure(shape[1] / shape[0])
             self._shape = shape
             self._last_hand = None
@@ -242,6 +277,7 @@ class WebcamPipeline:
         command = (
             self._controller.update(hand) if fresh else CursorCommand(CursorAction.NONE)
         )
+        system_action = self._system_action(command, fresh)
         if (
             self._recovering
             and self._temporal.status.stable is Gesture.UNKNOWN
@@ -273,7 +309,18 @@ class WebcamPipeline:
             self._click_feedback.update(command.action),
             self._sink.mode,
             metrics,
+            system_action,
         ), controlled
+
+    def _system_action(self, command: CursorCommand, fresh: bool) -> ActionResult:
+        """Advance non-cursor actions only on fresh observations and ENABLED gate."""
+        if not fresh:
+            return ActionResult()
+        gesture = command.gesture if command.gesture is not None else Gesture.UNKNOWN
+        return self._actions.update(
+            gesture,
+            enabled=self._controller.state is ControlState.ENABLED,
+        )
 
     def _infer(self, rgb: NDArray[np.uint8]) -> tuple[DetectedHand | None, bool]:
         """Return whether control may sample; pending results never advance EMA."""
@@ -348,6 +395,16 @@ class WebcamPipeline:
             self._last_hand = None
             self._last_result_at = None
             self._recovering = False
+        if key & 0xFF in (
+            ord("d"),
+            ord("D"),
+            ord("r"),
+            ord("R"),
+            ord("q"),
+            ord("Q"),
+            27,
+        ):
+            self._actions.reset()
         if key & 0xFF in (ord("r"), ord("R")):
             self._click_feedback.reset()
         return quit_requested
@@ -441,6 +498,7 @@ def run_webcam(config: DemoConfig) -> None:
     pipeline: WebcamPipeline | None = None
     try:
         cursor_config, sink = configure_output(config)
+        action_sink, action_config = configure_action_output(config)
         window_name = f"HGI - {sink.mode.value}"
         with (
             _preserve_cleanup_error(
@@ -458,6 +516,8 @@ def run_webcam(config: DemoConfig) -> None:
                 tracker,
                 cursor_config,
                 sink=sink,
+                action_sink=action_sink,
+                action_config=action_config,
                 tracker_config=config.tracker,
             )
             _run_loop(pipeline, camera, window_name)

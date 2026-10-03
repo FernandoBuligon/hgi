@@ -18,6 +18,7 @@ class GestureConfig:
     pinch_threshold: float = 0.25
     extension_ratio: float = 0.9
     thumb_spread_ratio: float = 0.2
+    thumb_vertical_ratio: float = 0.8
     min_reference_distance: float = 1e-6
     image_aspect_ratio: float = 1.0
 
@@ -26,13 +27,20 @@ class GestureConfig:
             self.pinch_threshold,
             self.extension_ratio,
             self.thumb_spread_ratio,
+            self.thumb_vertical_ratio,
             self.min_reference_distance,
             self.image_aspect_ratio,
         )
         if any(isinstance(value, bool) or not isfinite(value) for value in values):
             raise ValueError("Gesture thresholds must be finite numbers, not booleans")
-        if self.pinch_threshold < 0 or self.thumb_spread_ratio < 0:
-            raise ValueError("Pinch and thumb spread thresholds must be nonnegative")
+        if (
+            self.pinch_threshold < 0
+            or self.thumb_spread_ratio < 0
+            or self.thumb_vertical_ratio < 0
+        ):
+            raise ValueError(
+                "Pinch, thumb spread and thumb vertical thresholds must be nonnegative"
+            )
         if not 0 < self.extension_ratio <= 1:
             raise ValueError("Extension ratio must satisfy 0 < ratio <= 1")
         if self.min_reference_distance <= 0 or self.image_aspect_ratio <= 0:
@@ -152,3 +160,18 @@ def pinch_ratio(hand: DetectedHand, config: GestureConfig | None = None) -> floa
         points[HandLandmark.INDEX_FINGER_TIP],
         reference,
     )
+
+
+def thumb_vertical_direction(
+    hand: DetectedHand, config: GestureConfig | None = None
+) -> int:
+    """Return -1 for up, 1 for down and 0 when the thumb is not vertical enough."""
+    config = config if config is not None else GestureConfig()
+    points, reference = _hand_geometry(hand, config)
+    mcp = points[HandLandmark.THUMB_MCP]
+    tip = points[HandLandmark.THUMB_TIP]
+    dx = tip.x - mcp.x
+    dy = tip.y - mcp.y
+    if abs(dy) < config.thumb_vertical_ratio * reference or abs(dy) <= abs(dx):
+        return 0
+    return -1 if dy < 0 else 1

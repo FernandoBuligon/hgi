@@ -47,6 +47,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="select real mouse output; session still starts DISABLED (E enables)",
     )
+    parser.add_argument(
+        "--screenshot-dir",
+        type=Path,
+        help="directory for real PEACE screenshots; dry-run only shows intention",
+    )
+    parser.add_argument(
+        "--spotify-track-uri",
+        help="spotify:track URI used by ROCK; defaults to Highway to Hell",
+    )
     add_inference_arguments(parser)
     return parser
 
@@ -85,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
                     running_mode=RunningMode(args.running_mode),
                     delegate=InferenceDelegate(args.delegate),
                 ),
+                args.screenshot_dir
+                if args.screenshot_dir is not None
+                else DemoConfig().screenshot_directory,
+                args.spotify_track_uri
+                if args.spotify_track_uri is not None
+                else DemoConfig().spotify_track_uri,
             )
         )
     except (

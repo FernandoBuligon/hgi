@@ -39,6 +39,8 @@ class TemporalDecision:
     gesture: Gesture
     move: bool = False
     click: bool = False
+    mouse_down: bool = False
+    mouse_up: bool = False
     reset_motion: bool = False
 
 
@@ -93,6 +95,7 @@ class TemporalGestureFilter:
         self._candidate: Gesture | None = None
         self._candidate_since: float | None = None
         self._pinch_closed = False
+        self._mouse_down = False
         self._armed = False
         self._release_since: float | None = None
 
@@ -122,9 +125,10 @@ class TemporalGestureFilter:
         self._candidate_since = None
         self._release_since = None
         expired = self._tracking_expired(now)
+        mouse_up = expired and self._mouse_down
         if expired:
             self._clear_interaction()
-        return TemporalDecision(self._current, reset_motion=expired)
+        return TemporalDecision(self._current, mouse_up=mouse_up, reset_motion=expired)
 
     def _desired(
         self, observation: GestureObservation, ratio: float, now: float
@@ -151,18 +155,19 @@ class TemporalGestureFilter:
         self._current = desired
         return entered_pinch
 
-    def _click(self, entered_pinch: bool, now: float) -> bool:
+    def _mouse_down_event(self, entered_pinch: bool, now: float) -> bool:
         if not entered_pinch:
             return False
         cooldown_done = (
             self._last_click is None
             or now >= self._last_click + self._config.click_cooldown_seconds
         )
-        click = self._armed and cooldown_done
+        mouse_down = self._armed and cooldown_done
         self._armed = False
-        if click:
+        if mouse_down:
+            self._mouse_down = True
             self._last_click = now
-        return click
+        return mouse_down
 
     def _advance(self, observation: GestureObservation, now: float) -> TemporalDecision:
         ratio = observation.pinch_ratio
@@ -181,18 +186,25 @@ class TemporalGestureFilter:
         self._missing_since = None
         desired = self._desired(observation, ratio, now)
         entered_pinch = self._confirm(desired, now)
-        click = self._click(entered_pinch, now)
+        mouse_down = self._mouse_down_event(entered_pinch, now)
+        mouse_up = False
+        if self._mouse_down and self._current is not Gesture.PINCH:
+            self._mouse_down = False
+            mouse_up = True
         if (
             self._current is not Gesture.PINCH
             and self._release_since is not None
             and now >= self._release_since + self._config.stabilization_seconds
         ):
             self._armed = True
-        inactive = self._current in (Gesture.UNKNOWN, Gesture.OPEN_HAND, Gesture.FIST)
+        inactive = self._current not in (Gesture.POINT, Gesture.PINCH)
         return TemporalDecision(
             self._current,
-            move=self._current is Gesture.POINT and not self._pinch_closed,
-            click=click,
+            move=(self._current is Gesture.POINT and not self._pinch_closed)
+            or (self._current is Gesture.PINCH and self._mouse_down),
+            click=mouse_down,
+            mouse_down=mouse_down,
+            mouse_up=mouse_up,
             reset_motion=expired or inactive,
         )
 

@@ -76,6 +76,7 @@ class CursorController:
         self._temporal = temporal if temporal is not None else TemporalGestureFilter()
         self._position: Point2D | None = None
         self._observation: GestureObservation | None = None
+        self._button_down = False
         self._state = ControlState.DISABLED
 
     @property
@@ -110,7 +111,8 @@ class CursorController:
             self._state = ControlState.ENABLED
 
     def disable(self) -> None:
-        """Disarm, cancel pending gestures and clear motion without emitting."""
+        """Disarm and release a held button before clearing motion."""
+        self._release_button()
         self._state = ControlState.DISABLED
         self._observation = None
         self._temporal.reset()
@@ -126,29 +128,45 @@ class CursorController:
             mirror_x=self._config.mirror_x,
         )
 
-    def _move(self, hand: DetectedHand) -> CursorCommand:
+    def _move(
+        self, hand: DetectedHand, gesture: Gesture = Gesture.POINT
+    ) -> CursorCommand:
         smoothed = self._smoother.update(self._map_indicator(hand))
         self._position = Point2D(
             clamp(smoothed.x, 0.0, self._config.screen_width - 1),
             clamp(smoothed.y, 0.0, self._config.screen_height - 1),
         )
         return CursorCommand(
-            CursorAction.MOVE, self._position.x, self._position.y, Gesture.POINT
+            CursorAction.MOVE, self._position.x, self._position.y, gesture
         )
+
+    def _button(self, hand: DetectedHand, action: CursorAction) -> CursorCommand:
+        if self._position is None:
+            self._position = self._map_indicator(hand)
+        return CursorCommand(action, self._position.x, self._position.y, Gesture.PINCH)
 
     def _command(
         self, hand: DetectedHand | None, decision: TemporalDecision
     ) -> CursorCommand:
+        if hand is not None and decision.mouse_down:
+            return self._button(hand, CursorAction.MOUSE_DOWN)
+        if decision.mouse_up:
+            if self._position is not None:
+                command = CursorCommand(
+                    CursorAction.MOUSE_UP,
+                    self._position.x,
+                    self._position.y,
+                    Gesture.PINCH,
+                )
+                if decision.reset_motion:
+                    self._clear_motion()
+                return command
+            if hand is not None:
+                return self._button(hand, CursorAction.MOUSE_UP)
         if decision.reset_motion:
             self._clear_motion()
-        if hand is not None and decision.click:
-            if self._position is None:
-                self._position = self._map_indicator(hand)
-            return CursorCommand(
-                CursorAction.CLICK, self._position.x, self._position.y, Gesture.PINCH
-            )
         if hand is not None and decision.move:
-            return self._move(hand)
+            return self._move(hand, decision.gesture)
         return CursorCommand(CursorAction.NONE, gesture=decision.gesture)
 
     def update(self, hand: DetectedHand | None) -> CursorCommand:
@@ -165,15 +183,34 @@ class CursorController:
                 decision = self._temporal.update(self._observation)
                 command = self._command(hand, decision)
             self._sink.emit(command)
+            if command.action is CursorAction.MOUSE_DOWN:
+                self._button_down = True
+            elif command.action is CursorAction.MOUSE_UP:
+                self._button_down = False
             return command
-        except BaseException:
+        except BaseException as original:
             # Safety boundary: clean up, never hide the original failure.
-            self.disable()
+            try:
+                self.disable()
+            except BaseException as cleanup_error:
+                original.add_note(
+                    f"Mouse release during controller cleanup failed: {cleanup_error!r}"
+                )
             raise
 
     def _clear_motion(self) -> None:
         self._smoother.reset()
         self._position = None
+
+    def _release_button(self) -> None:
+        if not self._button_down or self._position is None:
+            self._button_down = False
+            return
+        command = CursorCommand(
+            CursorAction.MOUSE_UP, self._position.x, self._position.y, Gesture.PINCH
+        )
+        self._sink.emit(command)
+        self._button_down = False
 
     def reset(self) -> None:
         """Disable and clear all interaction state, preserving output history."""

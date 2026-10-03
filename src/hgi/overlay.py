@@ -14,6 +14,7 @@ from hgi.geometry import Point2D, map_camera_to_screen, normalized_to_pixels
 from hgi.gesture_detector import Gesture, GestureObservation
 from hgi.hand_landmarks import DetectedHand, HandLandmark
 from hgi.performance import PipelineMetrics
+from hgi.system_actions import ActionResult
 from hgi.temporal import TemporalStatus
 
 _FINGER_CHAINS = (
@@ -82,6 +83,7 @@ class OverlayState:
     click_feedback: ClickFeedbackState = ClickFeedbackState()
     mode: CursorMode = CursorMode.DRY_RUN
     metrics: PipelineMetrics | None = None
+    system_action: ActionResult = ActionResult()
 
 
 def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
@@ -107,6 +109,13 @@ def overlay_lines(state: OverlayState, config: CursorConfig) -> tuple[str, ...]:
         f"Loop FPS: {state.fps:.1f} | "
         f"Logical screen: {config.screen_width}x{config.screen_height}",
     )
+    if state.system_action.intent is not None:
+        suffix = (
+            "EXECUTED"
+            if state.system_action.executed
+            else state.system_action.message or "DRY-RUN"
+        )
+        lines += (f"System Action: {state.system_action.intent.kind.value} | {suffix}",)
     if state.metrics is not None:
         metrics = state.metrics
         lines += (

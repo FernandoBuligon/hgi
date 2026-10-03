@@ -66,18 +66,24 @@ def test_pending_frames_do_not_repeat_samples_or_cancel_confirmation(
     fake_clock.now = 0.18
     tracker.latest = sample(pinched(point), 0.18)
     clicked = pipeline.process(frame)[1]
-    assert clicked.command.action is CursorAction.CLICK
+    assert clicked.command.action is CursorAction.MOUSE_DOWN
     fake_clock.now = 0.20
     pending = pipeline.process(frame)[1]
     assert pending.command.action is CursorAction.NONE
     assert pending.click_feedback.click_count == 1
     assert [c.args[0].action for c in sink.emit.call_args_list].count(
-        CursorAction.CLICK
+        CursorAction.MOUSE_DOWN
     ) == 1
+    held_actions = []
     for at in (0.3, 0.5, 0.8):
         fake_clock.now = at
         tracker.latest = sample(pinched(point), at)
-        assert pipeline.process(frame)[1].command.action is CursorAction.NONE
+        held_actions.append(pipeline.process(frame)[1].command.action)
+    assert all(
+        action in (CursorAction.NONE, CursorAction.MOVE, CursorAction.MOUSE_UP)
+        for action in held_actions
+    )
+    assert CursorAction.MOUSE_DOWN not in held_actions
     assert pipeline.process(frame)[1].click_feedback.click_count == 1
 
 
@@ -123,7 +129,7 @@ def test_inference_stall_requires_release_before_clicking_again(
         fake_clock.now = at
         tracker.latest = sample(pinched(point), at)
         state = pipeline.process(frame)[1]
-    assert state.command.action is CursorAction.CLICK
+    assert state.command.action is CursorAction.MOUSE_DOWN
     assert state.click_feedback.click_count == 1
 
 

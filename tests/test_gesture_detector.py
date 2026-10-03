@@ -18,13 +18,32 @@ def with_pinch(hand: DetectedHand, gap: float) -> DetectedHand:
     return replace(hand, landmarks=tuple(points))
 
 
+def with_vertical_thumb(hand: DetectedHand, *, direction: str) -> DetectedHand:
+    """Make the thumb clearly vertical while long fingers remain as provided."""
+    points = list(hand.landmarks)
+    if direction == "up":
+        thumb = ((0.45, 0.70), (0.45, 0.55), (0.45, 0.40))
+    elif direction == "down":
+        thumb = ((0.45, 0.65), (0.45, 0.80), (0.45, 0.95))
+    else:
+        raise ValueError(direction)
+    for landmark, (x, y) in zip(
+        (HandLandmark.THUMB_MCP, HandLandmark.THUMB_IP, HandLandmark.THUMB_TIP),
+        thumb,
+        strict=True,
+    ):
+        points[landmark] = NormalizedLandmark(x, y, 0.0)
+    return replace(hand, landmarks=tuple(points))
+
+
 @pytest.mark.parametrize(
     "extended,expected",
     [
         (("index",), Gesture.POINT),
         (("thumb", "index", "middle", "ring", "pinky"), Gesture.OPEN_HAND),
         ((), Gesture.FIST),
-        (("index", "middle"), Gesture.UNKNOWN),
+        (("index", "middle"), Gesture.PEACE),
+        (("index", "pinky"), Gesture.ROCK),
         (("thumb", "index"), Gesture.UNKNOWN),
     ],
 )
@@ -56,6 +75,37 @@ def test_pinch_priority_over_point_without_requiring_extended_thumb(
     state = detect_fingers(hand)
     assert state.index and not any((state.thumb, state.middle, state.ring, state.pinky))
     assert GestureDetector().detect(hand) is Gesture.PINCH
+
+
+@pytest.mark.parametrize(
+    "direction,expected",
+    [("up", Gesture.THUMBS_UP), ("down", Gesture.THUMBS_DOWN)],
+)
+def test_vertical_thumb_gestures_require_closed_long_fingers(
+    hand_factory: Callable[..., DetectedHand],
+    direction: str,
+    expected: Gesture,
+) -> None:
+    detector = GestureDetector()
+    thumb = with_vertical_thumb(hand_factory(), direction=direction)
+    assert detector.detect(thumb) is expected
+    with_index_open = with_vertical_thumb(hand_factory("index"), direction=direction)
+    assert detector.detect(with_index_open) is not expected
+
+
+def test_sideways_thumb_is_not_a_thumb_direction_gesture(
+    hand_factory: Callable[..., DetectedHand],
+) -> None:
+    assert GestureDetector().detect(hand_factory("thumb")) is Gesture.UNKNOWN
+
+
+def test_rock_has_priority_over_peace_but_not_over_pinch(
+    hand_factory: Callable[..., DetectedHand],
+) -> None:
+    detector = GestureDetector()
+    rock = hand_factory("index", "pinky")
+    assert detector.detect(rock) is Gesture.ROCK
+    assert detector.detect(with_pinch(rock, gap=0)) is Gesture.PINCH
 
 
 @pytest.mark.parametrize("scale", [0.5, 2.0])

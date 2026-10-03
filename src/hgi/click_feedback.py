@@ -20,7 +20,7 @@ class ClickFeedbackState:
 class ClickFeedback:
     """Observe each emitted action once; never retain or emit cursor commands.
 
-    Each CLICK increments the session count and restarts a 500 ms display
+    Each MOUSE_DOWN increments the session count and restarts a 500 ms display
     deadline. MOVE/NONE only sample visibility. Use a separate monotonic clock
     for UI, not the temporal filter's clock. No background timer is needed.
     """
@@ -37,7 +37,7 @@ class ClickFeedback:
     def update(self, action: CursorAction) -> ClickFeedbackState:
         """Count a newly emitted action and return visibility at this UI sample."""
         now = self._clock()
-        if action is CursorAction.CLICK:
+        if action in (CursorAction.CLICK, CursorAction.MOUSE_DOWN):
             self._click_count += 1
             self._last_click_at = now
         recent = (

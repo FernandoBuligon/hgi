@@ -18,6 +18,8 @@ class FakeMouseBackend:
         self.size = Mock(return_value=size)
         self.move_to = Mock()
         self.click = Mock()
+        self.mouse_down = Mock()
+        self.mouse_up = Mock()
 
 
 @pytest.fixture
@@ -41,7 +43,7 @@ def test_move_rounds_once_clicks_once_and_none_has_no_effect(backend):
     backend.size.assert_called_once()  # no monitor polling in the loop
 
 
-@pytest.mark.parametrize("action", [CursorAction.MOVE, CursorAction.CLICK])
+@pytest.mark.parametrize("action", [CursorAction.MOVE, CursorAction.MOUSE_DOWN])
 @pytest.mark.parametrize("xy", [(1001, 0), (0, 501), (1000.6, 0)])
 def test_invalid_bounds_are_rejected_before_effect_and_lock_sink(backend, action, xy):
     sink = RealCursorSink(backend=backend)
@@ -86,7 +88,7 @@ def test_paired_override_uses_top_left_rectangle_without_scaling(backend):
     backend.move_to.assert_called_once_with(799, 399)
 
 
-@pytest.mark.parametrize("action", [CursorAction.MOVE, CursorAction.CLICK])
+@pytest.mark.parametrize("action", [CursorAction.MOVE, CursorAction.MOUSE_DOWN])
 @pytest.mark.parametrize("error", [RuntimeError("backend"), KeyboardInterrupt()])
 def test_failure_disables_controller_preserves_original_and_prevents_future_effects(
     backend, hand_factory, fake_clock, action, error
@@ -104,11 +106,11 @@ def test_failure_disables_controller_preserves_original_and_prevents_future_effe
     controller.update(point)
     hand = point
     method = backend.move_to
-    if action is CursorAction.CLICK:
+    if action is CursorAction.MOUSE_DOWN:
         hand = pinched(point)
         controller.update(hand)
         fake_clock.now += 0.08
-        method = backend.click
+        method = backend.mouse_down
     method.side_effect = error
     before = method.call_count
     with pytest.raises(type(error)) as caught:
@@ -128,7 +130,7 @@ def test_failure_disables_controller_preserves_original_and_prevents_future_effe
     assert method.call_count == before + 1
 
 
-def test_existing_temporal_filter_keeps_sustained_pinch_to_one_click(
+def test_existing_temporal_filter_holds_sustained_pinch_until_release(
     backend, hand_factory, fake_clock
 ):
     sink = RealCursorSink(backend=backend)
@@ -140,7 +142,7 @@ def test_existing_temporal_filter_keeps_sustained_pinch_to_one_click(
     point = hand_factory("index")
     controller.update(point)
     backend.move_to.assert_not_called()
-    backend.click.assert_not_called()
+    backend.mouse_down.assert_not_called()
     controller.enable()
     controller.update(point)
     fake_clock.now += 0.08
@@ -148,18 +150,19 @@ def test_existing_temporal_filter_keeps_sustained_pinch_to_one_click(
     pinch = pinched(point)
     controller.update(pinch)
     fake_clock.now += 0.08
-    click = controller.update(pinch)
-    assert click.action is CursorAction.CLICK
+    down = controller.update(pinch)
+    assert down.action is CursorAction.MOUSE_DOWN
     backend.move_to.assert_called_once_with(round(move.x), round(move.y))
-    backend.click.assert_called_once_with(round(click.x), round(click.y))
+    backend.mouse_down.assert_called_once_with(round(down.x), round(down.y))
     for _ in range(10):
         fake_clock.now += 0.1
-        assert controller.update(pinch).action is CursorAction.NONE
-    backend.click.assert_called_once()
-    before = backend.move_to.call_count, backend.click.call_count
+        assert controller.update(pinch).action is CursorAction.MOVE
+    backend.mouse_down.assert_called_once()
+    before = backend.move_to.call_count, backend.mouse_down.call_count
     controller.disable()
     controller.reset()
-    assert before == (backend.move_to.call_count, backend.click.call_count)
+    assert before == (backend.move_to.call_count, backend.mouse_down.call_count)
+    backend.mouse_up.assert_called_once()
 
 
 def test_pyautogui_adapter_preserves_failsafe_pause_and_only_uses_mouse(monkeypatch):
@@ -169,6 +172,8 @@ def test_pyautogui_adapter_preserves_failsafe_pause_and_only_uses_mouse(monkeypa
         size=Mock(return_value=(1001, 501)),
         moveTo=Mock(),
         click=Mock(),
+        mouseDown=Mock(),
+        mouseUp=Mock(),
     )
     monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -180,9 +185,17 @@ def test_pyautogui_adapter_preserves_failsafe_pause_and_only_uses_mouse(monkeypa
     adapter.move_to(10, 20)
     assert api.FAILSAFE is True
     adapter.click(10, 20)
+    adapter.mouse_down(10, 20)
+    adapter.mouse_up(10, 20)
     api.moveTo.assert_called_once_with(10, 20, duration=0.0, logScreenshot=False)
     api.click.assert_called_once_with(
         10, 20, clicks=1, button="primary", duration=0.0, logScreenshot=False
+    )
+    api.mouseDown.assert_called_once_with(
+        10, 20, button="primary", duration=0.0, logScreenshot=False
+    )
+    api.mouseUp.assert_called_once_with(
+        10, 20, button="primary", duration=0.0, logScreenshot=False
     )
     assert api.PAUSE == 0.1
 

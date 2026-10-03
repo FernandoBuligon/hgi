@@ -48,7 +48,7 @@ def test_pinch_confirmation_emits_one_click_and_freezes_pending_motion(fake_cloc
     assert filter_.update(observed(ratio=0.2)).click
     fake_clock.now = 0.5
     held = filter_.update(observed(ratio=0.2))
-    assert held.gesture is Gesture.PINCH and not held.click and not held.move
+    assert held.gesture is Gesture.PINCH and not held.click and held.move
 
 
 def test_inclusive_hysteresis_band_does_not_rearm_pinch(fake_clock):

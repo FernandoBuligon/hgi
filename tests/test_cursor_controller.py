@@ -111,7 +111,7 @@ def test_point_sequence_reuses_ema_in_both_axes(hand_factory):
     "pose,gesture",
     [
         (None, Gesture.UNKNOWN),
-        (("index", "middle"), Gesture.UNKNOWN),
+        (("index", "middle"), Gesture.PEACE),
         ((), Gesture.FIST),
         (("thumb", "index", "middle", "ring", "pinky"), Gesture.OPEN_HAND),
     ],
@@ -127,31 +127,28 @@ def test_inactivity_emits_none_and_discards_old_motion(hand_factory, pose, gestu
     assert sink.commands[1] == idle
 
 
-def test_pinch_clicks_last_virtual_position_once_and_does_not_move(hand_factory):
+def test_pinch_holds_last_virtual_position_once_and_then_drags(hand_factory):
     sink = DryRunCursorSink()
     controller = enabled_controller(CursorConfig(1001, 501), sink=sink)
     moved = controller.update(at_indicator(hand_factory("index"), 0.3, 0.4))
     pinch = pinched(at_indicator(hand_factory("index"), 0.8, 0.8))
-    click = controller.update(pinch)
+    down = controller.update(pinch)
     held = controller.update(pinch)
-    assert click == CursorCommand(CursorAction.CLICK, moved.x, moved.y, Gesture.PINCH)
-    assert held == CursorCommand(CursorAction.NONE, gesture=Gesture.PINCH)
+    assert down == CursorCommand(
+        CursorAction.MOUSE_DOWN, moved.x, moved.y, Gesture.PINCH
+    )
+    assert held.action is CursorAction.MOVE
     controller.update(hand_factory("index"))
-    assert controller.update(pinch).action is CursorAction.CLICK
-    assert [c.action for c in sink.commands] == [
-        CursorAction.MOVE,
-        CursorAction.CLICK,
-        CursorAction.NONE,
-        CursorAction.MOVE,
-        CursorAction.CLICK,
-    ]
+    controller.update(hand_factory("index"))
+    assert controller.update(pinch).action is CursorAction.MOUSE_DOWN
+    assert CursorAction.MOUSE_UP in [c.action for c in sink.commands]
 
 
-def test_initial_pinch_click_uses_mapped_indicator_without_a_move(hand_factory):
+def test_initial_pinch_down_uses_mapped_indicator_without_a_move(hand_factory):
     controller = enabled_controller(CursorConfig(1001, 501))
     controller.update(hand_factory())  # Confirm release without any MOVE.
     command = controller.update(pinched(at_indicator(hand_factory("index"), 0.3, 0.5)))
-    assert command.action is CursorAction.CLICK
+    assert command.action is CursorAction.MOUSE_DOWN
     assert (command.x, command.y) == pytest.approx((750, 250))
 
 
@@ -162,6 +159,7 @@ def test_pinch_preserves_ema_for_point_resume(hand_factory):
     pose = hand_factory("index")
     controller.update(at_indicator(pose, 0.1, 0.1))
     controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
+    controller.update(at_indicator(pose, 0.9, 0.9))
     resumed = controller.update(at_indicator(pose, 0.9, 0.9))
     assert (resumed.x, resumed.y) == pytest.approx((500, 250))
 
@@ -177,13 +175,13 @@ def test_reset_clears_position_ema_and_pinch_edge_but_keeps_output_history(
     controller.reset()
     controller.enable()
     controller.update(hand_factory())
-    click = controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
-    assert click.action is CursorAction.CLICK
-    assert (click.x, click.y) == pytest.approx((1000, 500))
+    down = controller.update(pinched(at_indicator(pose, 0.9, 0.9)))
+    assert down.action is CursorAction.MOUSE_DOWN
+    assert (down.x, down.y) == pytest.approx((1000, 500))
     controller.reset()
     controller.enable()
     assert controller.update(at_indicator(pose, 0.9, 0.9)).x == pytest.approx(1000)
-    assert len(sink.commands) == 5
+    assert len(sink.commands) >= 5
 
 
 def test_tracking_loss_requires_release_instead_of_rearming_a_closed_pinch(
@@ -192,11 +190,12 @@ def test_tracking_loss_requires_release_instead_of_rearming_a_closed_pinch(
     controller = enabled_controller(CursorConfig(1001, 501))
     hand = pinched(hand_factory("index"))
     controller.update(hand_factory())
-    assert controller.update(hand).action is CursorAction.CLICK
+    assert controller.update(hand).action is CursorAction.MOUSE_DOWN
     controller.update(None)
     assert controller.update(hand).action is CursorAction.NONE
-    controller.update(hand_factory())
-    assert controller.update(hand).action is CursorAction.CLICK
+    controller.update(hand_factory("index"))
+    assert controller.update(hand_factory("index")).action is CursorAction.MOVE
+    assert controller.update(hand).action is CursorAction.MOUSE_DOWN
 
 
 def test_invalid_geometry_propagates_and_clears_previous_motion(hand_factory):

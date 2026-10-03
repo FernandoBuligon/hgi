@@ -46,6 +46,13 @@ def test_enum_contracts_reject_untyped_actions_and_gestures() -> None:
         CursorCommand(CursorAction.MOVE, 1.0, 2.0, "POINT")
 
 
+def test_mouse_button_commands_use_position_like_physical_mouse_events() -> None:
+    down = CursorCommand(CursorAction.MOUSE_DOWN, 12.5, 24.5, Gesture.PINCH)
+    up = CursorCommand(CursorAction.MOUSE_UP, 12.5, 24.5, Gesture.PINCH)
+    assert down.action is CursorAction.MOUSE_DOWN
+    assert up.action is CursorAction.MOUSE_UP
+
+
 def test_dry_run_preserves_order_and_exposes_an_immutable_snapshot() -> None:
     sink = DryRunCursorSink()
     move = CursorCommand(CursorAction.MOVE, 12.5, 24.5, Gesture.POINT)
