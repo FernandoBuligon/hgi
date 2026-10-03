@@ -73,10 +73,10 @@ a execução. Isso confirma inicialização, inferência sem mão e fechamento,
 
 Captura, conversão BGR→RGB e overlay já estão implementados. Execute a demo
 documentada no README depois de preparar o bundle; a sessão inicia DISABLED e
-em dry-run. HGI não salva nem transmite frames. Validação humana de landmarks,
-gestos e cursor continua pendente. A Fase 10 mediu captura/inferência em hardware
-acessível fora do sandbox; metodologia e limitações em [PERFORMANCE.md](PERFORMANCE.md).
-Use [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md#teste-manual-final) para o roteiro.
+em dry-run. HGI não salva nem transmite frames. A Fase 10 mediu captura/inferência
+em hardware acessível fora do sandbox; metodologia e limitações em
+[PERFORMANCE.md](PERFORMANCE.md). O smoke manual da Fase 11 foi reportado pelo
+usuário como funcional.
 
 O [aviso de privacidade do MediaPipe 1.0.1](https://pypi.org/project/mediapipe/1.0.1/)
 informa processamento local dos dados de entrada e coleta de métricas de uso e

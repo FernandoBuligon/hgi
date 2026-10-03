@@ -149,26 +149,15 @@ Captura/close nativos podem bloquear; o timeout não mata drivers/threads.
 D/R/Q/Esc dependem de foco/leitura entre frames; Ctrl+C continua disponível.
 Termos/aviso de métricas da dependência estão em MODELS.md.
 
-## Aceite humano e recomendação
+## Recomendação
 
-Ordem em dry-run: CPU+IMAGE → CPU+VIDEO → CPU+LIVE_STREAM → GPU+VIDEO →
-GPU+LIVE_STREAM. Mesma câmera, resolução, iluminação e movimentos. Anote:
+Manter **IMAGE/CPU** como default por compatibilidade e pela ausência de ganho
+comprovado na cena comparável. **VIDEO/CPU** é o próximo candidato para uso
+interativo quando o usuário quiser menor custo temporal de tracking.
+LIVE_STREAM permanece experimental/opt-in; GPU não é default diante dos avisos
+nativos e da falta de ganho consistente no throughput medido.
 
-| Delegate/mode | FPS | Latência percebida | POINT | PINCH único/mantido | Jitter/estabilidade | Erros |
-|---|---|---|---|---|---|---|
-| CPU/IMAGE | | | | | | |
-| CPU/VIDEO | | | | | | |
-| CPU/LIVE_STREAM | | | | | | |
-| GPU/VIDEO | | | | | | |
-| GPU/LIVE_STREAM | | | | | | |
-
-O usuário confirmou o roteiro em dry-run e informará FPS, latência percebida,
-POINT/PINCH, jitter, estabilidade e erros. Controle real não é necessário para
-o aceite desta fase; seu custo fica para avaliação futura, sem alterar PAUSE.
-Resultados humanos continuam pendentes e não foram considerados PASS.
-
-Manter **IMAGE/CPU** por compatibilidade e ausência de ganho comprovado na cena
-comparável. **VIDEO/CPU** é o próximo candidato a testar com mão estável.
-LIVE_STREAM é experimental/opt-in; GPU não é default diante dos avisos e falta
-de ganho de throughput. A meta 24–25 FPS depende da captura efetiva, não é teste
-de pytest e não foi declarada atingida. Resolução maior não foi testada/adotada.
+Não há tabela manual versionada de FPS/latência por gesto. Os dados de
+desempenho deste documento são os benchmarks reproduzíveis registrados durante
+o desenvolvimento; novas medições manuais podem ser feitas sob demanda com o
+script de benchmark, sem virar requisito de release.

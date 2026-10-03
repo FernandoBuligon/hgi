@@ -1,18 +1,12 @@
 # Assets da demonstração
 
-Coloque aqui uma **gravação real** chamada `demo.gif` e screenshots que ajudem
-a explicar o HGI. O README principal contém um placeholder até o GIF existir;
-depois substitua-o por `![HGI em dry-run](assets/demo.gif)`.
+Esta pasta existe para materiais opcionais de portfólio, como screenshots ou uma
+gravação curta produzida manualmente. O HGI não salva frames por padrão e o
+repositório não depende de `demo.gif` para estar apresentável.
 
-Sugestão: uma demo curta em dry-run mostrando landmarks, POINT, um PINCH,
-contador CLICK e disable/reset. Mostre o modo e o estado da sessão no enquadramento.
-Use uma ferramenta externa de gravação escolhida por você; HGI não salva frames.
-Gravar vídeo é uma etapa manual, não executada pelo agente.
+Se você decidir adicionar uma mídia real no futuro, revise telas, rostos,
+notificações e dados pessoais antes de versionar. Mantenha arquivos brutos e
+vídeos grandes fora do repositório.
 
-Antes de publicar, revise telas, rostos e dados pessoais presentes na gravação.
-Mantenha o GIF compacto e guarde gravações brutas fora do repositório.
-Não adicione binários fictícios, modelos MediaPipe ou imagens de demonstração
-que aparentem validação de hardware ainda não realizada.
-
-Para preparar uma demo real, siga primeiro o
-[roteiro de segurança e teste manual](../docs/RELEASE_CHECKLIST.md#teste-manual-final).
+Não adicione binários fictícios, modelos MediaPipe ou imagens que aparentem
+validação de hardware que não ocorreu.

@@ -1,6 +1,6 @@
 # Arquitetura do HGI
 
-Atualizado em 30/09/2026, na Fase 10 de performance e delegates explícitos.
+Atualizado em 02/10/2026, na Fase 11 de ações avançadas e integração local.
 Instalação e execução: [README.md](../README.md).
 Aceite físico/release: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
@@ -196,7 +196,7 @@ Não há I/O, relógio, acesso ao sistema operacional ou estado temporal nesses 
 | `FingerState(thumb, index, middle, ring, pinky)` | Dataclass imutável com cinco flags nomeadas |
 | `detect_fingers(hand, config=None)` | Recebe DetectedHand e retorna FingerState |
 | `pinch_ratio(hand, config=None)` | Retorna razão finita entre pontas polegar/indicador e referência da palma |
-| `Gesture` | Enum UNKNOWN, POINT, PINCH, OPEN_HAND, FIST |
+| `Gesture` | Enum UNKNOWN, POINT, PINCH, OPEN_HAND, FIST, THUMBS_UP, THUMBS_DOWN, PEACE, ROCK |
 | `GestureDetector(config=None).detect(hand)` | Retorna um rótulo por chamada; None significa UNKNOWN |
 | `detector.config` | Configuração imutável exposta para inspeção |
 
@@ -265,12 +265,16 @@ razão enquanto a mão permanece acima do limite geométrico mínimo.
 Primeiro validar os dedos, depois aplicar a prioridade:
 
 1. PINCH quando a razão é suficientemente pequena, independentemente das flags.
-2. POINT quando somente o indicador está estendido, incluindo polegar recolhido.
-3. OPEN_HAND quando os cinco dedos estão estendidos.
-4. FIST quando nenhum dedo está estendido.
-5. UNKNOWN para qualquer outra pose válida ou ausência de mão.
+2. ROCK quando indicador e mindinho estão estendidos, com polegar recolhido.
+3. PEACE quando indicador e médio estão estendidos, com polegar recolhido.
+4. THUMBS_UP/THUMBS_DOWN quando o polegar está vertical e os demais fechados.
+5. POINT quando somente o indicador está estendido, incluindo polegar recolhido.
+6. OPEN_HAND quando os cinco dedos estão estendidos.
+7. FIST quando nenhum dedo está estendido.
+8. UNKNOWN para qualquer outra pose válida ou ausência de mão.
 
-POINT, OPEN_HAND e FIST são mutuamente exclusivos; PINCH pode sobrepor-se a eles.
+POINT, ROCK, PEACE, THUMBS, OPEN_HAND e FIST são mutuamente exclusivos; PINCH
+pode sobrepor-se a eles.
 Uma pinça mantida retorna PINCH a cada chamada. Isso não é um evento de clique:
 histerese, confirmação, debounce e cooldown pertencem à camada temporal abaixo.
 `observe(hand)` retorna GestureObservation imutável com raw, pose e pinch_ratio.
@@ -326,8 +330,8 @@ A integração com captura/exibição pertence a webcam.py e à demo dedicada.
 
 | API | Contrato |
 |---|---|
-| `CursorAction` | Enum MOVE, CLICK, NONE; somente intenções |
-| `CursorCommand(action, x=None, y=None, gesture=None)` | Dataclass imutável; MOVE/CLICK exigem X/Y finitos e não negativos; NONE exige X/Y ausentes; gesto opcional e tipado |
+| `CursorAction` | Enum MOVE, CLICK legado, MOUSE_DOWN, MOUSE_UP, NONE; somente intenções de cursor |
+| `CursorCommand(action, x=None, y=None, gesture=None)` | Dataclass imutável; MOVE/CLICK/MOUSE_DOWN/MOUSE_UP exigem X/Y finitos e não negativos; NONE exige X/Y ausentes; gesto opcional e tipado |
 | `CursorSink.emit(command)` | Protocol de um método; não exige herança ou framework |
 | `DryRunCursorSink(max_history=None)` | Recebe todos os comandos, inclusive NONE; limite opcional descarta os mais antigos |
 | `sink.commands` | Snapshot tuple imutável; não expõe a lista interna |
@@ -382,21 +386,28 @@ usam alpha por chamada. O default 0.25 favorece suavização; alpha 1 acompanha
 diretamente a entrada. O clamp após a EMA mantém a saída nos limites da tela
 lógica, inclusive sob arredondamentos. Não há compensação por FPS.
 
-### PINCH, inatividade e reset
+### PINCH, drag, inatividade e reset
 
-O filtro temporal confirma PINCH e autoriza CLICK somente armado e fora do
-cooldown. PINCH mantido emite NONE. A entrada de pinça congela MOVE imediatamente,
-inclusive enquanto ainda instável. CLICK usa a última posição virtual, já
-suavizada; sem MOVE anterior, usa o indicador mapeado sem inicializar a EMA. Isso
-define um alvo lógico sem consultar o cursor real. RealCursorSink encaminha
-um clique primário nesse alvo; o backend pode reposicionar para executá-lo.
+O filtro temporal confirma PINCH e autoriza uma transição de botão: entrada
+estável emite MOUSE_DOWN uma vez; permanência em PINCH emite MOVE com
+INDEX_FINGER_TIP para permitir drag; saída confirmada emite MOUSE_UP uma vez.
+Uma pinça curta vira mouseDown+mouseUp, equivalente a clique normal. Não há gesto
+separado para drag nem repetição de MOUSE_DOWN em frames seguintes.
 
-PINCH preserva posição/EMA, permitindo retomar POINT com suavização. Ausência
-emite NONE e congela saída, preservando movimento durante o grace period.
+MOUSE_DOWN usa a última posição virtual, já suavizada; sem MOVE anterior, usa o
+indicador mapeado sem inicializar a EMA. MOVE durante PINCH usa o mesmo
+mapeamento e a mesma EMA do POINT. MOUSE_UP usa a última posição conhecida antes
+de limpar o movimento quando necessário. RealCursorSink encaminha press/release
+primário nesse alvo; o backend pode reposicionar para executar a ação.
+
+PINCH preserva posição/EMA, permitindo arrastar e retomar POINT com suavização.
+Ausência emite NONE e congela saída durante o grace period; ausência prolongada
+emite MOUSE_UP quando havia botão pressionado.
 UNKNOWN/OPEN_HAND/FIST ainda instáveis mantêm o gesto estável anterior; quando
 confirmados, emitem NONE e limpam movimento. NONE informa o gesto estável,
 portanto pode indicar POINT ou PINCH durante uma ausência breve, sem executá-los.
-Reset/disable desabilitam e limpam toda a interação, sem apagar comandos observados.
+Reset/disable desabilitam e limpam toda a interação; se havia botão pressionado,
+tentam emitir MOUSE_UP antes da limpeza, sem apagar comandos observados.
 Qualquer erro de processamento/saída desabilita a sessão e propaga a exceção
 original, sem falso sucesso, retry ou clique pendente.
 
@@ -439,8 +450,9 @@ DetectedHand → GestureDetector.observe → GestureObservation
 ```
 
 `temporal.py` contém TemporalConfig imutável, TemporalDecision imutável e
-TemporalGestureFilter. A decisão possui gesture estável, permissões move/click
-e reset_motion. Não há event bus, threads, timers ou contagem de frames.
+TemporalGestureFilter. A decisão possui gesture estável, permissões move,
+mouse_down, mouse_up e reset_motion. Não há event bus, threads, timers ou
+contagem de frames.
 O controller mantém somente opt-in e movimento; o filtro mantém transições/tempo.
 
 | Configuração temporal | Padrão | Contrato |
@@ -448,7 +460,7 @@ O controller mantém somente opt-in e movimento; o filtro mantém transições/t
 | stabilization_seconds | 0.08 s | Duração de confirmação; finita e ≥0 |
 | enter_pinch_threshold | 0.25 | Fechar quando ratio ≤ limiar |
 | exit_pinch_threshold | 0.32 | Abrir quando ratio ≥ limiar; exige enter < exit |
-| click_cooldown_seconds | 0.30 s | Intervalo mínimo entre intenções CLICK autorizadas |
+| click_cooldown_seconds | 0.30 s | Compatibilidade temporal; PINCH agora usa press/release e não repete down |
 | tracking_grace_seconds | 0.15 s | Tolerância desde a primeira observação de mão ausente |
 
 Todos os parâmetros são finitos, não negativos e rejeitam bool. Zero nas
@@ -468,11 +480,10 @@ Fechar a pinça bloqueia MOVE imediatamente enquanto aguarda confirmação.
 
 O latch de pinça entra em ratio ≤0.25, sai em ratio ≥0.32 e conserva estado
 na faixa intermediária. A entrada/saída passa pela mesma confirmação temporal.
-Uma abertura contínua por 80 ms e estado estável não-PINCH armam o clique.
-Ao entrar em PINCH estável, a ativação é consumida, emitindo CLICK apenas se
-armada e fora do cooldown. Permanecer fechado nunca repete. Uma ativação
-bloqueada é descartada; passar o prazo mantendo PINCH não dispara clique atrasado.
-É necessária nova abertura confirmada e nova entrada. Comparações incluem a borda.
+Uma abertura contínua por 80 ms e estado estável não-PINCH rearma a próxima
+entrada. Ao entrar em PINCH estável, o filtro emite MOUSE_DOWN apenas uma vez.
+Permanecer fechado nunca repete MOUSE_DOWN e continua permitindo MOVE. Ao sair
+de PINCH de forma válida, emite MOUSE_UP. Comparações incluem a borda.
 
 ### Relógio e ausência de mão
 
@@ -484,7 +495,8 @@ Prazos usam `now >= start + duration`, com precisão normal de ponto flutuante.
 
 Ausência curta: preserva gesto estável, latch/armamento de pinça, posição e EMA;
 emite NONE. Cancela candidato/release pendentes: tempo ausente não confirma gesto.
-Na recuperação, PINCH mantido não produz outro CLICK e POINT retoma a mesma EMA.
+Na recuperação, PINCH mantido não produz outro MOUSE_DOWN e POINT retoma a mesma
+EMA.
 
 Ausência ≥150 ms: limpa gesto/candidato, latch e armamento, e solicita reset de
 EMA/posição. Mantém o último clique para não contornar o cooldown. Reaquisição
@@ -504,10 +516,10 @@ Não compartilhar uma instância entre mãos ou threads; handedness não é iden
 |---|---|
 | Construção / DISABLED | Nenhum detector/clock é chamado; update emite somente NONE |
 | enable() | Opt-in explícito; neutro, EMA vazia e PINCH desarmado; repetições são idempotentes |
-| disable() / controller.reset() | DISABLED, limpa toda a temporalidade/cooldown e movimento; nenhum comando emitido |
+| disable() / controller.reset() | DISABLED, libera botão pressionado se necessário, limpa temporalidade/cooldown e movimento |
 | Perda breve | Mantém sessão e interação, congela saída; confirmação pendente descartada |
 | Perda prolongada | Mantém opt-in, limpa interação/movimento, mantém cooldown; exige abertura confirmada |
-| Exceção de detector/filtro/mapeamento/sink | Desabilita, limpa e relança a exceção original; nenhum retry |
+| Exceção de detector/filtro/mapeamento/sink | Tenta MOUSE_UP se havia botão pressionado, desabilita, limpa e relança a exceção original; nenhum retry |
 
 As capturas de exceção existem nas fronteiras para limpar e relançar,
 sem ocultar falhas. Re-enable é uma sessão nova e exige confirmação/abertura;
@@ -516,9 +528,11 @@ de segurança em relação à Fase 5. O reset direto do filtro limpa somente seu
 estado; sessões devem usar controller.reset para limpar também opt-in e EMA.
 
 DryRunCursorSink permanece padrão; ControlState.ENABLED autoriza intenções no
-sink selecionado. A Fase 8 oferece somente mouse MOVE/CLICK real, mantendo
-temporal.py intacto. Não há teclado, configuração persistente ou extras.
-O aceite manual de hardware e o MVP completo continuam pendentes.
+sink selecionado. A Fase 11 oferece mouse MOVE/MOUSE_DOWN/MOUSE_UP real,
+mantendo a separação entre cursor e ações de sistema. Não há teclado,
+configuração persistente ou event bus.
+O smoke manual da Fase 11 foi reportado pelo usuário como funcional; novas
+calibrações continuam opcionais e dependem do ambiente.
 
 ## Integração visual da Fase 7
 
@@ -633,7 +647,7 @@ ou gravação/transmissão de frames no código HGI.
 Teste normal usa frames sintéticos, fake tracker/captura/janela e geometria,
 temporalidade, sink e desenho reais. Native OpenCV sobre arrays não exige display.
 Captura/inferência reais foram medidas na Fase 10, conforme PERFORMANCE.md;
-gestos humanos, qualidade, ergonomia e controle físico continuam pendentes.
+o smoke manual da Fase 11 foi reportado pelo usuário como funcional.
 Plugins/display ou drivers nativos defeituosos podem falhar fora das exceções
 Python. Q/Esc são lidos entre frames; bloqueio nativo de captura/inferência pode
 atrasar encerramento. Nenhum threshold foi recalibrado ou feature extra adicionada.
@@ -674,7 +688,7 @@ flowchart LR
     K --> I[CursorCommand]
     I --> V
     I --> R
-    R --> P[PyAutoGUIBackend: MOVE / clique primário]
+    R --> P[PyAutoGUIBackend: MOVE / mouseDown / mouseUp]
 ```
 
 `real_cursor.py` é o único módulo de produção que importa PyAutoGUI, somente no
@@ -686,10 +700,10 @@ foi alterado na Fase 8.
 
 | API | Contrato |
 |---|---|
-| `MouseBackend` | Protocol size() → tuple[int,int], move_to(x:int,y:int), click(x:int,y:int) |
+| `MouseBackend` | Protocol size(), move_to(), click(), mouse_down(), mouse_up() |
 | `PyAutoGUIBackend()` | Import tardio, X11 no Linux, FAILSAFE=True, PAUSE preservada |
 | `RealCursorSink(backend=None, screen_width=None, screen_height=None)` | Backend injetável; consulta size uma vez; override pareado dentro dos limites |
-| `sink.emit(command)` | NONE sem ação; MOVE uma chamada; CLICK um clique primário no alvo |
+| `sink.emit(command)` | NONE sem ação; MOVE uma chamada; MOUSE_DOWN/MOUSE_UP pressionam/liberam botão primário |
 | `sink.screen_width / screen_height / detected_size` | Dimensões efetivas/detectadas somente leitura, sem consultas posteriores |
 | `sink.failed` | Latch permanente após falha de ação; reconstrução necessária |
 | `CursorMode` / `sink.mode` | DRY-RUN ou REAL CONTROL; independente de ControlState |
@@ -703,20 +717,23 @@ exigem largura/altura juntas e positivas. Em real, não podem exceder a tela e
 representam um retângulo de origem (0,0), sem selecionar monitor ou offset.
 O sink converte subpixels por Python round (empates para par), valida números
 originais/arredondados em 0≤x<width, 0≤y<height e rejeita violações antes de input.
-Não recalcula EMA, mapeamento ou clipping. CLICK utiliza a posição contida no
-comando em uma chamada PyAutoGUI.click(clicks=1, button="primary"); não há MOVE
-extra do HGI, debounce no sink nem fila/replay. A biblioteca pode reposicionar
-o mouse para clicar nesse alvo. Screenshots de log ficam explicitamente desligados.
+Não recalcula EMA, mapeamento ou clipping. MOUSE_DOWN e MOUSE_UP utilizam a
+posição contida no comando em chamadas PyAutoGUI.mouseDown/mouseUp; não há
+debounce no sink nem fila/replay. A biblioteca pode reposicionar para executar
+a ação nesse alvo. Screenshots de log ficam explicitamente desligados.
 
 O controller aceita CursorSink por emit callable, sem importar backend ou SO.
 Nada muda em TemporalGestureFilter, thresholds, histerese, armamento, cooldown
 ou matemática do cursor. Construção começa DISABLED. Flag+sem E não gera input;
-E sem flag continua virtual. D/R/Q/Esc desabilitam sem emissão adicional.
+E sem flag continua virtual. D/R/Q/Esc desabilitam e soltam botão pressionado,
+se houver.
 Mudança de dimensões da captura reinicia DISABLED com o mesmo sink; um sink
 travado por falha continua travado. Não há recuperação automática.
 
-Qualquer falha em MOVE/CLICK, inclusive FailSafeException ou KeyboardInterrupt,
-trava o sink e propaga a mesma exceção. Controller/pipeline usam cleanup+raise,
+Qualquer falha em MOVE/MOUSE_DOWN/MOUSE_UP, inclusive FailSafeException ou
+KeyboardInterrupt, trava o sink e propaga a mesma exceção. Se a falha ocorrer
+com botão pressionado, RealCursorSink tenta mouse_up no último alvo conhecido
+antes de latchear a falha. Controller/pipeline usam cleanup+raise,
 desabilitando imediatamente. NONE continua inofensivo; até um enable externo
 posterior não permite novas ações no sink travado. O loop normal encerra no
 primeiro erro. Context managers da aplicação preservam a exceção original se
@@ -746,8 +763,70 @@ Chamadas nativas e a pausa podem atrasar a próxima leitura de tecla.
 Testes usam somente fakes de mouse e proíbem PyAutoGUI real. Cobrem duplo opt-in,
 modo visual, resolução, limites/round, exatamente uma chamada, PINCH sustentado,
 falhas/interrupts e fechamento simultaneamente defeituoso. Consulta X11 real foi
-somente leitura, FAILSAFE=True e PAUSE=0.1. Sem /dev/video*, smoke A–D, FPS,
-direção física, acurácia e cliques humanos continuam pendentes no plano.
+somente leitura, FAILSAFE=True e PAUSE=0.1. O smoke manual posterior foi reportado
+pelo usuário como funcional; não há tabela manual de FPS versionada.
+
+## Ações avançadas da Fase 11
+
+A Fase 11 adiciona ações sem transformar `CursorController` em um controlador
+universal. O fluxo fica bifurcado depois do filtro temporal:
+
+```text
+Stable Gesture
+  ├─ cursor gestures → CursorController → CursorSink
+  └─ system gestures → GestureActionController → ActionIntent → ActionSink
+```
+
+`system_actions.py` define `ActionKind`, `ActionIntent`, `ActionResult`,
+`ActionConfig`, `DryRunActionSink`, `RealActionSink` e backends injetáveis.
+CursorCommand continua separado e não carrega volume, screenshots ou URIs. O
+overlay lê apenas snapshots: gesto, comando de cursor e resultado de ação de
+sistema.
+
+### Gestos e ações
+
+| Gesto estável | Intenção | Controle real |
+|---|---|---|
+| THUMBS_UP | VOLUME_UP | `wpctl` ou fallback `pactl`, +5%, máximo 100% |
+| THUMBS_DOWN | VOLUME_DOWN | `wpctl` ou fallback `pactl`, -5%, mínimo 0% |
+| PEACE | SCREENSHOT | backend PyAutoGUI salva em `~/Pictures/HGI/` por padrão |
+| ROCK | PLAY_SPOTIFY_TRACK | MPRIS/DBus quando disponível, senão `spotify URI` ou `xdg-open URI` |
+
+THUMBS_UP/DOWN exigem polegar vertical claro e os demais dedos fechados. PEACE
+exige indicador+médio abertos e polegar fechado. ROCK exige indicador+mindinho
+abertos e polegar fechado. Essas regras são intencionais, simples e
+dimensionais; não tentam reconhecer linguagem de sinais nem cobrir rotações
+complexas da mão.
+
+### Debounce e repetição
+
+Volume é contínuo, mas limitado por estabilidade e intervalo de repetição:
+250 ms para iniciar e 350 ms entre emissões. Sair do gesto limpa a repetição.
+Screenshot é one-shot por ativação, com cooldown de 2 s. ROCK exige 700 ms de
+estabilidade, dispara uma vez, exige saída do gesto e respeita cooldown de 5 s.
+Todos os timers usam clock injetável e não chamam `sleep()`.
+
+### Segurança dos efeitos reais
+
+Dry-run é padrão. `configure_action_output` cria `DryRunActionSink` sem tocar em
+volume, tela ou aplicativos. `RealActionSink` só é selecionado por
+`--real-control`; mesmo assim, `GestureActionController.update(..., enabled=True)`
+só é chamado quando a sessão está ENABLED. Backends reais são lazy: PyAutoGUI de
+screenshot, comandos de volume e abridor Spotify são construídos apenas quando a
+ação correspondente dispara.
+
+Subprocessos usam listas fixas de argumentos, `shell=False` implícito e sem
+concatenação de comandos. Volume consulta o valor atual, soma o delta e limita
+0..100 antes de chamar `set-volume`. Screenshot cria o diretório alvo no momento
+de salvar, fora do repositório por padrão. Spotify não usa Web API, OAuth,
+client secret, senha ou automação visual; depende do cliente desktop local e da
+sessão do usuário.
+
+Falhas de volume/screenshot/Spotify viram `ActionResult(executed=False,
+message="error: ...")` para o overlay. A visão continua rodando; essas falhas não
+deixam mouse pressionado porque o cursor permanece em sua própria fronteira de
+segurança. Falhas do cursor real continuam fatais para a sessão, pois input preso
+é mais perigoso que perder uma ação de sistema.
 
 ## Instalação e preparação para portfólio
 

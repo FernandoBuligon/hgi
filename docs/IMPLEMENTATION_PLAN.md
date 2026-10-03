@@ -6,19 +6,20 @@ Fonte de requisitos: [AGENTS.md](../AGENTS.md). O HGI é uma aplicação local
 de visão computacional para uma mão, com cursor suavizado, clique por pinça e
 overlay de debug. Usará um detector pronto e regras geométricas explicáveis.
 
-Este documento foi criado na **Fase 0**. As Fases 1–9 foram implementadas
-conforme as autorizações posteriores do usuário, com evidências nas seções 9–17.
-A autorização atual é somente a **Fase 10 — Real-time Performance & GPU
-Acceleration**, registrada na seção 18. A numeração vigente segue
+Este documento foi criado na **Fase 0**. As Fases 1–10 foram implementadas
+conforme as autorizações posteriores do usuário, com evidências nas seções 9–18.
+A autorização atual é somente a **Fase 11 — Advanced Gesture Actions & System
+Integration**, registrada na seção 19. A numeração vigente segue
 esses pedidos: Fase 6 temporalidade, Fase 7 integração visual e Fase 8 backend
 real. Não corresponde à sequência original de extras do AGENTS.md.
-Aceites com webcam e mouse humano continuam pendentes. Não há autorização para
-novas funcionalidades, tag, push ou publicação de release nesta fase.
+O smoke manual da Fase 11 foi reportado pelo usuário como funcional. Não há
+autorização para novas funcionalidades, tag ou publicação de release nesta fase.
 
 O MVP inclui dry-run padrão, controle real opt-in, landmarks, handedness quando
 disponível, dedos estendidos, movimento, pinça, histerese, confirmação, cooldown
-e encerramento limpo. Volume, mídia, calibração e persistência ficam para
-depois da validação do MVP. FPS observável foi autorizado na Fase 7.
+e encerramento limpo. A Fase 11 adiciona volume, screenshot e Spotify atrás do
+mesmo duplo opt-in; calibração e persistência continuam fora do escopo.
+FPS observável foi autorizado na Fase 7.
 Não haverá treinamento, backend remoto, banco ou API OpenAI.
 
 ## 2. Inspeção inicial
@@ -1445,17 +1446,17 @@ sem evidência técnica. pyproject.toml permanece a fonte única de dependência
 
 ### Alterações e checkpoints
 
-- README reestruturado para portfólio: descrição, placeholder real, funcionalidades,
-  gestos, arquitetura Mermaid, segurança, instalação, modelo, uso/controles,
-  testes/build, decisões, limitações, roadmap e licença pendente. Histórico de
-  manutenção fica neste plano, sem números de cobertura permanentes no README.
+- README reestruturado para portfólio: descrição, funcionalidades, gestos,
+  arquitetura Mermaid, segurança, instalação, modelo, uso/controles, testes/build,
+  decisões, limitações, roadmap e licença. Histórico de manutenção fica neste
+  plano, sem números de cobertura permanentes no README.
 - Plano/arquitetura/modelos atualizados para o código existente; evidências
   anteriores preservadas nas seções 9–16. Sem refactor da arquitetura ou pipeline.
 - CLI descreve todas as opções, defaults/unidades e controles; dependências
   ausentes indicam comando de instalação. CameraError preserva a mensagem e
   sugere outro índice sem retry/autodetecção. Docstring antiga do entrypoint corrigida.
-- assets/README.md prepara demo.gif sem binário fictício.
-  RELEASE_CHECKLIST.md separa checks automatizados, aceite físico e decisões do autor.
+- assets/README.md documenta mídias opcionais sem exigir GIF.
+  RELEASE_CHECKLIST.md separa checks automatizados e decisões de release.
 - .gitignore protege *.task em qualquer nível e /.aws/, além dos caches, logs,
   coverage, IDE e artefatos já ignorados. Nenhum arquivo do usuário foi apagado.
 - pyproject.toml auditado e preservado: extras coerentes, versões sem alteração,
@@ -1487,7 +1488,7 @@ Todas as verificações do ambiente HGI usaram Python 3.11.16 de
 | python scripts/demo_cursor.py | PASS no venv novo, sequência finita POINT/PINCH/cooldown/disable |
 | demo_webcam.py --model /tmp/hgi-phase9-absent.task | Exit 1 esperado, mensagem docs/MODELS.md, sem câmera/backend real |
 | python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist . | PASS nos ambientes HGI e venv completo; wheel hgi-0.1.0.dev0-py3-none-any.whl |
-| Links locais e anchors Markdown | PASS em README, docs e assets; placeholder GIF não é link quebrado |
+| Links locais e anchors Markdown | PASS em README, docs e assets; sem dependência de mídia binária |
 | git diff --check e revisão do diff | PASS, somente escopo Fase 9 |
 
 Instalação limpa completa: criado venv /tmp/hgi-phase9-clean com Python 3.11,
@@ -1545,19 +1546,14 @@ IDE, build/dist, venv, logs e coverage. A dependência MediaPipe informa métric
 de uso/desempenho, documentadas em MODELS.md; não foi prometida ausência de
 tráfego da biblioteca nativa. A revisão não equivale a auditoria completa de CVEs.
 
-### Pendências de aceite e release
+### Estado de aceite e release
 
-Sem /dev/video*: smoke humano dry-run/real não realizado nesta sessão. Não há
-FPS ou latência observados, nem validação física de POINT/PINCH/direção/jitter.
-Os resultados sintéticos não substituem o roteiro A–D.
+Na Fase 9, o smoke humano ainda não tinha sido realizado. Após a Fase 11, o
+usuário testou localmente e reportou o fluxo como funcional. GIF de demonstração
+e tabela manual de FPS não são mais requisitos documentais do projeto.
 
-Dependem do usuário: aceite manual com webcam e mouse em área segura, medições
-e observações, demo.gif real e escolha da licença. MIT é uma opção
-para considerar; não aplicada nem criada sem autorização. Após esses gates,
-atualizar versão para 0.1.0 e revalidar testes/wheel antes de autorizar tag/release.
-O checklist está preparado, com gates físicos/decisões abertos. Nesta fase não
-houve tag, push, publicação ou nova funcionalidade principal. Próximo passo é
-fechar essas pendências da release; nenhuma fase adicional foi iniciada.
+A licença MIT foi adotada e a versão declarada é `0.1.0`. Não houve tag, release
+ou publicação; essas ações continuam exigindo autorização futura específica.
 
 Fontes oficiais revisadas nesta fase:
 [PyPA — empacotamento](https://packaging.python.org/en/latest/tutorials/packaging-projects/),
@@ -1721,3 +1717,132 @@ Recomendação provisória: IMAGE/CPU como default; VIDEO/CPU como próximo cand
 com mão estável, LIVE_STREAM experimental e GPU opt-in. Meta 24–25 FPS depende
 da captura efetiva e não foi declarada atingida. Nenhuma funcionalidade adicional,
 tag, push ou publicação foi iniciada.
+
+## 19. Fase 11 — Advanced Gesture Actions & System Integration
+
+**Estado: implementada em código e em validação.** Escopo autorizado: novos gestos
+THUMBS_UP, THUMBS_DOWN, PEACE e ROCK; volume, screenshot, Spotify e nova semântica
+de PINCH como botão físico. Não houve push, tag, release, Web API do Spotify,
+login automático, novos gestos fora da lista ou feature extra.
+
+### Plano curto executado
+
+1. Ler AGENTS, README, arquitetura, plano, performance, módulos, scripts e testes.
+2. Escrever RED tests para gestos, ações de sistema, PINCH hold/drag, backends
+   falsos e integração do pipeline.
+3. Implementar o menor conjunto: enum expandido, heurísticas geométricas,
+   MOUSE_DOWN/MOUSE_UP, `system_actions.py`, overlay e CLI mínima.
+4. Revisar segurança: dry-run padrão, duplo opt-in, subprocessos sem shell,
+   backends lazy, fake backends no pytest e liberação obrigatória do mouse.
+5. Atualizar README/arquitetura/plano e executar QA local completo.
+
+### Implementação
+
+Novos gestos reconhecidos em `GestureDetector`:
+
+| Gesto | Heurística principal | Ação |
+|---|---|---|
+| THUMBS_UP | polegar vertical para cima; demais dedos fechados | VOLUME_UP |
+| THUMBS_DOWN | polegar vertical para baixo; demais dedos fechados | VOLUME_DOWN |
+| PEACE | indicador+médio abertos; anelar+mindinho+polegar fechados | SCREENSHOT |
+| ROCK | indicador+mindinho abertos; médio+anelar+polegar fechados | PLAY_SPOTIFY_TRACK |
+
+Prioridade documentada: PINCH, ROCK, PEACE, THUMBS_UP/DOWN, POINT, OPEN_HAND,
+FIST, UNKNOWN. PINCH continua acima das poses para evitar conflito com clique/drag.
+ROCK vem antes de PEACE por ser mais específico na distribuição de dedos.
+
+`CursorController` preserva sua responsabilidade: recebe decisões temporais e
+produz somente `CursorCommand`. PINCH agora emite `MOUSE_DOWN` na entrada estável,
+MOVE enquanto a pinça continua e `MOUSE_UP` na saída confirmada ou em perda longa
+de tracking. Disable/reset/erro tentam soltar o botão se ele já estava pressionado.
+`RealCursorSink` usa `mouseDown`/`mouseUp` do PyAutoGUI e tenta release no último
+ponto conhecido se uma falha ocorrer durante botão pressionado.
+
+A nova camada `system_actions.py` contém `ActionKind`, `ActionIntent`,
+`ActionResult`, `ActionConfig`, `GestureActionController`, `DryRunActionSink`,
+`RealActionSink`, `CommandVolumeBackend`, `PyAutoGUIScreenshotBackend` e
+`LocalSpotifyBackend`. O pipeline chama essa camada em paralelo à camada de
+cursor, somente com observações frescas e somente quando a sessão está ENABLED.
+
+Backends reais:
+
+- Volume: `wpctl` preferencial em PipeWire, fallback explícito `pactl`; volume
+  atual é lido e o alvo é clampado em 0..100. Subprocessos usam lista de argumentos
+  e não usam `shell=True`.
+- Screenshot: backend PyAutoGUI isolado, construído de forma lazy; salva fora do
+  repositório por padrão em `~/Pictures/HGI/`.
+- Spotify: backend local sem Web API; tenta MPRIS via `busctl`, depois `spotify URI`
+  e fallback `xdg-open URI`. URI default: `spotify:track:2zYzyRzz6pRmhPzyfMEC8s`.
+
+Inspeção do ambiente desta fase: `wpctl` e `pactl` estão presentes; Spotify Desktop
+está instalado via pacote nativo `spotify-client`; `/usr/bin/spotify` aponta para
+`/usr/share/spotify/spotify`; há serviço MPRIS `org.mpris.MediaPlayer2.spotify`
+quando o app está aberto; `playerctl` não estava disponível. Isso orientou a escolha
+por `wpctl`/`pactl` e MPRIS/URI local, sem credenciais.
+
+### TDD e testes adicionados
+
+Checkpoints RED/GREEN principais:
+
+- `tests/test_gesture_detector.py`: enum/heurísticas ausentes → THUMBS, PEACE,
+  ROCK e ambiguidades passaram.
+- `tests/test_cursor.py`, `tests/test_cursor_session.py`, `tests/test_temporal.py`,
+  `tests/test_cursor_controller.py`, `tests/test_real_cursor.py`, `tests/test_webcam.py`
+  e `tests/test_live_pipeline.py`: CLICK antigo → hold/drag com MOUSE_DOWN/MOVE/
+  MOUSE_UP, tracking loss e disable seguros passaram.
+- `tests/test_system_actions.py`: módulo ausente → dry-run, repetição de volume,
+  screenshot one-shot, ROCK debounce/cooldown, real sink com backends falsos,
+  clamp de volume e falha externa reportada passaram.
+- Integração do pipeline: PEACE em dry-run aparece como intenção; sink injetado só
+  executa após enable; nenhum teste abre app, captura tela ou move mouse real.
+
+### Segurança e limitações
+
+Dry-run continua default. `--real-control` apenas seleciona sinks reais; ações reais
+exigem também E/ENABLED. Backends reais de sistema são lazy para que selecionar
+real-control não importe PyAutoGUI de screenshot nem toque volume/Spotify antes do
+gesto. Falhas de ações de sistema viram erro no overlay e preservam o loop visual.
+Falhas de cursor real continuam fatais para a sessão por segurança.
+
+Limitações conhecidas: THUMBS_UP/DOWN dependem da orientação vertical no plano da
+imagem; rotações fortes da mão podem virar UNKNOWN. Spotify fechado pode abrir a
+URI, mas iniciar playback depende do cliente local estar instalado, logado e aceitar
+URI/MPRIS. Nenhum teste automatizado captura screenshot real ou abre Spotify.
+
+### Smoke manual reportado
+
+Após a implementação da Fase 11, o usuário executou o HGI localmente e reportou
+que o fluxo está funcionando. Esta documentação não mantém tabela manual de FPS
+nem exige gravação de GIF para fechar a fase. Limitações específicas continuam
+as mesmas: Spotify depende do cliente local/logado e Wayland não é suportado
+para controle real.
+
+### Verificação final da Fase 11
+
+Interpretador dos comandos: `/home/syl/miniconda3/envs/hgi/bin/python`.
+
+| Comando/revisão | Resultado real |
+|---|---|
+| `python -m pytest -q` | 477 passed |
+| `python -m pytest --cov=hgi --cov-report=term-missing` | 477 passed, 95% total; módulos puros principais 95–100%, `system_actions.py` 77% por backends reais/lazy não executados em pytest |
+| `python -m ruff check .` | All checks passed |
+| `python -m ruff format --check .` | 57 files already formatted |
+| `python -m compileall src` | PASS |
+| `python -m pip check` | No broken requirements found |
+| `git diff --check` | PASS |
+| `python -m pip wheel --no-deps --no-build-isolation --wheel-dir /tmp/hgi-phase11-wheel .` | Wheel `hgi-0.1.0-py3-none-any.whl`, PASS |
+| Instalação da wheel em `/tmp/hgi-phase11-clean` sem índice | PASS; `python -m hgi` imprime a identificação |
+| `scripts/demo_webcam.py --help` no venv limpo e no ambiente principal | PASS; mostra `--screenshot-dir` e `--spotify-track-uri` |
+| `python scripts/demo_cursor.py` | PASS; sequência demonstra POINT, PINCH→MOUSE_DOWN, drag MOVE e MOUSE_UP |
+| `python scripts/benchmark_hand_tracker.py --running-mode image --duration 1 --json` | PASS; sintético sem mãos, 95 frames processados em ~1 s |
+
+Wheel SHA-256: `5e3dfba8fbac4acae969ba5d467c3cfeea64ca93635fc2e6d7356995c21ab914`.
+O benchmark emitiu aviso de cache Matplotlib por `~/.config/matplotlib` não estar
+escrevível e usou `/tmp`; não afetou o resultado. `pip check` emitiu apenas aviso
+de cache pip sem permissão, também sem quebrar dependências.
+
+Revisão de segurança da fase: subprocessos usam listas de argumentos; não há
+`shell=True`, `eval`, `exec`, concatenação de comandos, tokens ou credenciais.
+Dry-run não toca volume, tela nem Spotify. Ações reais exigem `--real-control` e
+sessão ENABLED. MOUSE_UP é tentado em disable/reset/quit/perda longa/falha/saída.
+Nenhum teste automatizado capturou tela, abriu Spotify ou moveu mouse real.
